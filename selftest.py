@@ -384,7 +384,7 @@ async def main() -> None:
     check(not result.ok, "关闭后无法继续买入")
 
     panel = S.render_market_panel(store, trader)
-    check("今日股市" in panel.markdown, "股市面板可渲染")
+    check("股市" in panel.markdown, "股市面板可渲染")
     holdings_card = S.render_holdings(store, trader)
     check("我的持股" in holdings_card.markdown, "持股面板可渲染")
 

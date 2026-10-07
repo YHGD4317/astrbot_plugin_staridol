@@ -503,8 +503,8 @@ async def integration() -> None:
     S.refresh_daily(store, force=True)
     target = next(c for c in store.market_companies.values() if c.investable)
     player.cash = 50000
-    result = await run("今日股市")
-    check(result.card is not None and "今日股市" in result.card.markdown, "股市面板正常")
+    result = await run("股市")
+    check(result.card is not None and "股市" in result.card.markdown, "股市面板正常")
     check(target.name in result.card.markdown, "股市面板包含招标公司")
     result = await run(f"投资{target.name}5%")
     check(result.ok and target.holders.get(player.uid) == 5, "股市买入指令生效", result.text)
@@ -538,7 +538,7 @@ async def integration() -> None:
         (f"查询{star}", star),
         ("信息", "董事长面板"),
         ("集团面板", "星海集团"),
-        ("今日股市", "股市"),
+        ("股市", "股市"),
         ("事务进度", "今日事务进度"),
         ("指令菜单", "指令菜单"),
     ]:

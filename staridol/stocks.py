@@ -140,7 +140,7 @@ def buy_shares(store: GameStore, player: Player, name: str, shares: float) -> Re
     if found is not None:
         return _buy_player_company(store, player, found[0], found[1], shares)
 
-    return Result.fail(f"股市中没有找到「{name}」，可发送「今日股市」查看当前行情。")
+    return Result.fail(f"股市中没有找到「{name}」，可发送「股市」查看当前行情。")
 
 
 def _buy_market(store: GameStore, player: Player, company: MarketCompany, shares: int) -> Result:
@@ -361,7 +361,7 @@ def close_investment(store: GameStore, player: Player, name: str) -> Result:
 def render_market_panel(store: GameStore, player: Player) -> R.Card:
     """股市行情面板。"""
     refresh_daily(store)
-    lines = ["# 今日股市", ""]
+    lines = ["# 股市", ""]
     lines.append("独立公司（招标中的公司可投资，其余暂不接受投资）")
     lines.append("")
     for company in store.market_companies.values():
@@ -429,7 +429,7 @@ def render_holdings(store: GameStore, player: Player) -> R.Card:
     if not holdings:
         lines.append("当前没有持有任何股份。")
         lines.append("")
-        lines.append("可在「今日股市」中寻找招标中的公司进行投资。")
+        lines.append("可在「股市」中寻找招标中的公司进行投资。")
         return R.Card(markdown="\n".join(lines))
     total = 0
     for name, shares, price in holdings:

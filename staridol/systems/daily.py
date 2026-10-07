@@ -65,5 +65,5 @@ def new_day_notice(info: dict, player: Player) -> str:
         lines.append(f"今日秀场次数已恢复（{player.show_left} 次）。")
     if info.get("market_reset"):
         lines.append(f"今日商业活动次数已恢复（{player.market_left} 次），发送「商业活动」查看项目。")
-    lines.append("股市今日已重新招标，发送「今日股市」查看行情。")
+    lines.append("股市今日已重新招标，发送「股市」查看行情。")
     return "\n".join(lines)
