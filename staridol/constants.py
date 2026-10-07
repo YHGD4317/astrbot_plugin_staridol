@@ -825,19 +825,18 @@ MENU_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 #: 自定义菜单（C2C）：(名称, 类型, 内容)，类型 menu 时内容为子菜单列表
 CUSTOM_MENU: list[tuple[str, str, object]] = [
     ("今日行程", "send_message", "今日行程"),
+    ("商业活动", "send_message", "商业活动"),
     ("今日秀场", "send_message", "今日秀场"),
     ("员工", "send_message", "员工"),
-    ("项目", "send_message", "项目面板"),
     ("资产", "send_message", "信息"),
-    ("商城", "send_message", "打开商城"),
-    ("银行", "send_message", "银行账目"),
     (
         "更多",
         "menu",
         [
-            ("登记集团", "send_message", "登记"),
-            ("商业活动", "send_message", "商业活动"),
             ("今日股市", "send_message", "今日股市"),
+            ("银行", "send_message", "银行账目"),
+            ("项目", "send_message", "项目面板"),
+            ("商城", "send_message", "打开商城"),
             ("持股", "send_message", "持股"),
             ("指令菜单", "send_message", "指令菜单"),
         ],
