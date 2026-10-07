@@ -438,6 +438,9 @@ async def integration() -> None:
         "登记" in (result.text or "") + (result.card.markdown if result.card else ""),
         "引导文本包含登记示例",
     )
+    check(result.card is not None and result.card.has_buttons(), "未注册引导卡片带登记按钮")
+    btn = result.card.buttons[0][0][1] if result.card and result.card.buttons else ""
+    check(btn == "登记星海集团，决策50财商50口才50", "登记按钮填入完整格式", btn)
 
     # 2. 注册
     result = await run("登记星海集团，决策50财商50口才50")

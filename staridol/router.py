@@ -308,14 +308,25 @@ class Router:
             pass
         return player
 
-    @staticmethod
-    def _need_register(player: Player) -> Result:
-        return Result.fail(
+    #: 点击登记按钮时填入输入框的示例集团名，玩家只需替换此名即可发送
+    _REGISTER_SAMPLE_NAME = "星海集团"
+
+    def _need_register(self, player: Player) -> Result:
+        total = self.store.init_points
+        per = total // 3
+        rest = total - per * 2
+        text = (
             "你还没有登记集团。\n"
             "发送「登记（集团名），决策50财商50口才50」即可创建集团"
             f"（初始 {C.DEFAULT_DAILY_QUEST} 项事务、初始资金 {U.fmt_money(1000)}），"
-            "发送前请把括号里的内容换成你自己的集团名。"
+            "也可以直接点击下方按钮，把登记格式填入输入框，改好集团名即可发送。"
         )
+        # 点击后把完整的登记样例填入输入框，玩家只需替换集团名
+        sample = f"登记{self._REGISTER_SAMPLE_NAME}，决策{per}财商{per}口才{rest}"
+        card = R.Card(markdown=text).with_buttons(
+            [[R.button("填入登记格式", sample)]]
+        )
+        return Result.fail(text, card=card)
 
     # ------------------------------------------------------------------
     # 基础指令
