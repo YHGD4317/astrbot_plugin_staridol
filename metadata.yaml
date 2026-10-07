@@ -1,6 +1,10 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: astrbot_plugin_staridol
+display_name: 娱乐圈模拟器
+short_desc: 艺人养成 + 集团经营双线文字游戏，支持 QQ 官方按钮卡片
+desc: 娱乐向商业模拟器。以艺人养成为核心，兼有今日事务、项目投资、银行、商城、股市等经营玩法。支持 QQ 官方机器人的 Markdown 卡片与按钮交互，数据本地持久化。
+version: v1.1.0
+author: staridol
+astrbot_version: ">=4.5.0"
+support_platforms:
+  - qq_official
+  - aiocqhttp

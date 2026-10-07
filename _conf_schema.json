@@ -1,0 +1,71 @@
+{
+  "use_card": {
+    "description": "使用 Markdown 卡片与按钮",
+    "type": "bool",
+    "default": true,
+    "hint": "在 QQ 官方机器人平台上，将重要信息渲染为 Markdown 卡片，并为今日事务、秀场、商城等场景附带可点击按钮。其他平台会自动降级为纯文本。"
+  },
+  "sync_bot_menu": {
+    "description": "自动同步机器人菜单与指令面板",
+    "type": "bool",
+    "default": true,
+    "hint": "启动后自动把插件内置的快捷菜单同步到 QQ 机器人的自定义菜单（单聊）与指令面板（群聊/单聊）。管理员也可随时发送「同步机器人菜单」手动触发。"
+  },
+  "notify_on_finish": {
+    "description": "完成后推送结果",
+    "type": "bool",
+    "default": true,
+    "hint": "角色训练完成、项目结算结束时推送结果。关闭后需玩家自行查询。"
+  },
+  "notify_mode": {
+    "description": "结果投递方式",
+    "type": "string",
+    "default": "push_first",
+    "options": ["push_first", "always_queue", "push_only"],
+    "hint": "push_first：先尝试主动推送，被平台拒绝（例如主动消息配额用尽）时转入离线队列，玩家下次发言随回复补发；always_queue：不主动推送，全部走离线队列，最省配额；push_only：只主动推送，失败即丢弃。玩家可随时发送「未读消息」取回队列内容。"
+  },
+  "daily_quest_base": {
+    "description": "每日事务基础数量",
+    "type": "int",
+    "default": 5,
+    "hint": "集团总资产每提升一个档位，每日事务数量 +1。"
+  },
+  "show_refresh_times": {
+    "description": "每日秀场刷新次数",
+    "type": "int",
+    "default": 3,
+    "hint": "玩家每天可使用「今日秀场」的次数，可通过道具恢复。"
+  },
+  "show_artist_count": {
+    "description": "每次秀场候选人数",
+    "type": "int",
+    "default": 5
+  },
+  "market_refresh_times": {
+    "description": "每日商业活动刷新次数",
+    "type": "int",
+    "default": 3,
+    "hint": "与今日秀场一致：每次发送「商业活动」都会消耗一次机会并刷新项目列表，刷新后旧项目无法再投资。"
+  },
+  "init_money": {
+    "description": "初始资金（单位：w）",
+    "type": "int",
+    "default": 1000
+  },
+  "init_points": {
+    "description": "初始自由加点总数",
+    "type": "int",
+    "default": 150
+  },
+  "tick_interval": {
+    "description": "后台扫描间隔（秒）",
+    "type": "int",
+    "default": 20,
+    "hint": "定时任务扫描训练/项目是否到期、扣减项目体力的间隔，越小越准时，但会增加资源消耗。"
+  },
+  "max_artists": {
+    "description": "员工上限",
+    "type": "int",
+    "default": 30
+  }
+}
