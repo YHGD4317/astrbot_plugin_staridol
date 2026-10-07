@@ -281,7 +281,8 @@ class GameStore:
         player = self.get(uid)
         if player is None:
             player = self.create_player(uid, name)
-        elif name and player.name != name:
+        elif name and not player.custom_name and player.name != name:
+            # 未自定义昵称时跟随外部昵称更新；已自定义则保持不变
             player.name = name
         return player
 

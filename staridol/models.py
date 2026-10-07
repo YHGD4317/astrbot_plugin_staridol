@@ -548,6 +548,7 @@ class Player:
 
     uid: str  # QQ 号
     name: str = "董事长"
+    custom_name: str = ""  # 玩家自行修改的昵称；为空时以 QQ 昵称作为默认展示名
     group_id: str = ""
     umo: str = ""  # 会话来源，用于主动推送
     company_name: str = ""
@@ -722,6 +723,7 @@ class Player:
         return {
             "uid": self.uid,
             "name": self.name,
+            "custom_name": self.custom_name,
             "group_id": self.group_id,
             "umo": self.umo,
             "company_name": self.company_name,
@@ -762,6 +764,7 @@ class Player:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Player:
         player = cls(uid=str(data.get("uid") or ""), name=str(data.get("name") or "董事长"))
+        player.custom_name = str(data.get("custom_name") or "")
         player.group_id = str(data.get("group_id") or "")
         player.umo = str(data.get("umo") or "")
         player.company_name = str(data.get("company_name") or "")

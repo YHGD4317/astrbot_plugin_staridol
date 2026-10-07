@@ -182,7 +182,7 @@ def render_player_panel(
     running = player.running_projects()
     lines = [
         f"# {player.company_name or '未登记集团'} · 董事长面板",
-        f"**总裁**：{player.name}",
+        f"**董事长**：{player.name}",
         "",
         f"**属性**：决策 {player.decision} · 财商 {player.finance} · 口才 {player.eloquence}",
         player_asset_block(player, tier),

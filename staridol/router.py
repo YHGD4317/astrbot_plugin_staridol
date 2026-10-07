@@ -131,6 +131,8 @@ class Router:
         rules: list[tuple[re.Pattern[str], str]] = [
             # ---- 基础 ----
             (re.compile(r"^(?:指令菜单|菜单|帮助|玩法|help)$"), "menu"),
+            (re.compile(r"^(?:改名|修改昵称|设置昵称)\s*$"), "rename_help"),
+            (re.compile(r"^(?:改名|修改昵称|设置昵称)\s*(?P<name>[^\s,，、%]{1,16})$"), "rename"),
             (re.compile(r"^(?:登记|注册)\s*(?P<rest>.+)$"), "register"),
             (re.compile(r"^(?:信息|个人面板|系统面板|我的面板|我的信息|资产)$"), "player_panel"),
             (re.compile(r"^(?:集团面板|集团状态|集团信息)$"), "group_panel"),
@@ -295,8 +297,10 @@ class Router:
         player = self.store.get(uid)
         name = event.get_sender_name() or "董事长"
         if player is None:
+            # 首次出现：默认以 QQ 昵称作为展示名
             player = self.store.create_player(uid, name)
-        else:
+        elif not player.custom_name:
+            # 未自定义昵称时，跟随 QQ 昵称更新；已自定义则保持不变
             player.name = name
         try:
             player.umo = event.unified_msg_origin
@@ -341,6 +345,31 @@ class Router:
         lines.append("> 括号中的内容需要替换成你自己的信息后再发送。")
         lines.append("> 卡片上的按钮可以直接点击，会自动把指令填进输入框。")
         return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+    async def _cmd_rename_help(
+        self, player: Player, event: AstrMessageEvent, match: re.Match
+    ) -> Result:
+        """改名指令的用法与当前昵称提示。"""
+        if player.custom_name:
+            current = f"自定义昵称：**{player.name}**"
+        else:
+            current = f"当前昵称（来自 QQ）：**{player.name}**"
+        return Result.success(
+            text=(
+                f"{current}\n"
+                "发送「改名（新昵称）」即可自定义你在游戏中的昵称，例如：改名娱乐圈大佬"
+            )
+        )
+
+    async def _cmd_rename(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        """玩家自行修改昵称。"""
+        raw = (match.group("name") or "").strip("《》<>「」 ")
+        if has_placeholder(raw) or not raw:
+            return Result.fail("昵称不能包含占位符或为空，例如：改名娱乐圈大佬")
+        old = player.name
+        player.name = raw
+        player.custom_name = raw
+        return Result.success(text=f"好的，你的昵称已由「{old}」改为「{raw}」。（发送「信息」可查看）")
 
     async def _cmd_register(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         if player.points_assigned:
