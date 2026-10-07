@@ -3,9 +3,10 @@
 QQ 官方机器人对**主动消息**（不带 msg_id 的推送）有条数与频率限制，
 超出配额时平台会直接拒绝。因此后台任务产出的结果需要一个可靠的兜底通道：
 
-* ``push_first``（默认）：先尝试主动推送；被拒绝时把内容写入玩家的
+* ``push_first``：先尝试主动推送；被拒绝时把内容写入玩家的
   ``pending_notices`` 离线队列，玩家下次发言时随回复一并送达；
-* ``always_queue``：完全不主动推送，全部走离线队列（最省配额）；
+* ``always_queue``（默认）：完全不主动推送，全部走离线队列，玩家发任意
+  游戏指令时提醒未读变动（QQ 官方机器人通常没有主动消息权限）；
 * ``push_only``：只主动推送，失败即丢弃。
 
 本模块刻意不依赖 AstrBot，便于单独测试与复用。
@@ -18,8 +19,10 @@ from typing import Any, Protocol
 #: 可用的投递模式
 NOTIFY_MODES = ("push_first", "always_queue", "push_only")
 
-#: 默认投递模式
-DEFAULT_NOTIFY_MODE = "push_first"
+#: 默认投递模式。QQ 官方机器人对主动消息普遍无权限（日志可见
+#: "主动消息失败, 无权限"），因此默认不主动推送，改为离线队列 +
+#: 玩家发指令时提醒未读变动。
+DEFAULT_NOTIFY_MODE = "always_queue"
 
 
 class _Sender(Protocol):

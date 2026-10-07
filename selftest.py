@@ -157,6 +157,11 @@ async def main() -> None:
         "初始评分 = 基础分 + 制作加成",
         str(project.score),
     )
+    check(
+        1 <= project.duration <= 8,
+        "项目时长随机 1~8 小时（不再受参数指定）",
+        str(project.duration),
+    )
 
     # 重名自动加序号
     result = P.plan_project(store, player, 100, "综艺", "今天吃什么", duration=2)
@@ -164,7 +169,10 @@ async def main() -> None:
 
     result = P.start_project(store, player, "今天吃什么")
     check(result.ok and project.status == C.PROJECT_RUNNING, "项目已开始")
-    check(abs(project.end_at - project.start_at - 4 * 3600) < 1, "时长为 4 小时")
+    check(
+        abs(project.end_at - project.start_at - project.duration * 3600) < 1,
+        "项目结束时间与随机时长一致",
+    )
 
     artist.stamina = 100
     artist.status = C.STATUS_IDLE
@@ -479,7 +487,8 @@ async def main() -> None:
         mode="push_first",
     )
     check(queued and player.notice_count() == 2, "批量投递全部入队", str(player.notice_count()))
-    check(N.normalize_mode("不存在的模式") == "push_first", "非法模式回退为默认值")
+    check(N.normalize_mode("不存在的模式") == "always_queue", "非法模式回退为默认值（always_queue）")
+    check(N.DEFAULT_NOTIFY_MODE == "always_queue", "默认投递模式为 always_queue（不主动推送）")
 
     player.push_notice("待补发内容")
     text = R.format_notices(player.take_notices())

@@ -560,7 +560,7 @@ class Router:
         invest = parse_amount(groups.get("invest") or "0")
         ptype = groups.get("type") or ""
         name = (groups.get("name") or "").strip().strip("《》")
-        duration = int(groups["dur"]) if groups.get("dur") else None
+        # 玩家不再指定时长：立项后随机 1~8 小时（plan_project 内部处理）
         if has_placeholder(name):
             return Result.fail(
                 "项目名里似乎还留着占位内容，请替换成你想要的名字后再发送。\n"
@@ -568,7 +568,7 @@ class Router:
             )
         if invest <= 0:
             return Result.fail("请指定投资额，例如「用1000w筹划综艺（项目名）」。")
-        return project_sys.plan_project(self.store, player, invest, ptype, name, duration)
+        return project_sys.plan_project(self.store, player, invest, ptype, name)
 
     async def _cmd_start_project(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         if not player.points_assigned:

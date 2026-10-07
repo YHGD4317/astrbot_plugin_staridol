@@ -20,9 +20,9 @@
   "notify_mode": {
     "description": "结果投递方式",
     "type": "string",
-    "default": "push_first",
-    "options": ["push_first", "always_queue", "push_only"],
-    "hint": "push_first：先尝试主动推送，被平台拒绝（例如主动消息配额用尽）时转入离线队列，玩家下次发言随回复补发；always_queue：不主动推送，全部走离线队列，最省配额；push_only：只主动推送，失败即丢弃。玩家可随时发送「未读消息」取回队列内容。"
+    "default": "always_queue",
+    "options": ["always_queue", "push_first", "push_only"],
+    "hint": "always_queue（默认）：完全不主动推送，结果统一进入离线队列，玩家发送任意游戏指令时随回复提醒未读变动（推荐，QQ 官方机器人通常没有主动消息权限）；push_first：先尝试主动推送，被拒绝时转入离线队列；push_only：只主动推送，失败即丢弃。玩家可随时发送「未读消息」取回队列内容。"
   },
   "daily_quest_base": {
     "description": "每日事务基础数量",

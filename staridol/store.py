@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import time
 from pathlib import Path
@@ -94,6 +95,7 @@ class GameStore:
         self.bot_menu_version: int = 0  # 已同步到 QQ 机器人的菜单版本
         self.command_panels: dict[str, str] = {}  # scope -> 指令面板 ID
         self.lock = asyncio.Lock()
+        self._io_lock = asyncio.Lock()
         self._dirty = False
         self._last_save = 0.0
         self._loaded = False
@@ -190,7 +192,13 @@ class GameStore:
         self._dirty = True
 
     async def save(self, force: bool = False) -> None:
-        """把内存数据写回磁盘（默认 5 秒节流）。"""
+        """把内存数据写回磁盘（默认 5 秒节流）。
+
+        Windows 下对目标文件执行原子替换（tmp -> players.json）时，若目标正被
+        其他进程占用（例如杀毒扫描、资源管理器预览），``Path.replace`` 会抛出
+        WinError。为此这里用一个独立的 I/O 锁把写入串行化，避免多次并发 ``save``
+        互相竞争同一个 tmp 文件；替换失败时回退为直接写目标文件。
+        """
         if not self._dirty and not force:
             return
         current = time.time()
@@ -208,15 +216,35 @@ class GameStore:
             "command_panels": dict(self.command_panels),
         }
         text = json.dumps(payload, ensure_ascii=False, indent=1)
-        try:
+        # 串行化写盘，避免多个协程并发操作同一个 tmp 文件
+        async with self._io_lock:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             tmp = self.file_path.with_suffix(".tmp")
-            await asyncio.to_thread(tmp.write_text, text, "utf-8")
-            await asyncio.to_thread(tmp.replace, self.file_path)
-            self._dirty = False
-            self._last_save = current
-        except Exception as exc:
-            self._log("error", f"[staridol] 存档写入失败：{exc}")
+            try:
+                await asyncio.to_thread(self._write_text, tmp, text)
+                try:
+                    # 原子替换：失败（目标被占用）时回退为直接写目标
+                    await asyncio.to_thread(os.replace, tmp, self.file_path)
+                    self._dirty = False
+                    self._last_save = current
+                    return
+                except OSError:
+                    self._log("warning", "[staridol] 原子替换失败，回退为直接写目标文件。")
+                    await asyncio.to_thread(self._write_text, self.file_path, text)
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+                    self._dirty = False
+                    self._last_save = current
+            except Exception as exc:
+                self._log("error", f"[staridol] 存档写入失败：{exc}")
+
+    @staticmethod
+    def _write_text(path: Path, text: str) -> None:
+        """以 UTF-8 写文本；用 open + write 而非 write_text，便于控制编码容错。"""
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
 
     async def flush_loop(self, interval: float = 10.0) -> None:
         """后台循环：定期落盘，直到被取消。"""

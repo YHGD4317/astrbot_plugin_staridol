@@ -835,7 +835,7 @@ CUSTOM_MENU: list[tuple[str, str, object]] = [
         "更多",
         "menu",
         [
-            ("登记集团", "send_message", "登记（集团名），决策50财商50口才50"),
+            ("登记集团", "send_message", "登记"),
             ("商业活动", "send_message", "商业活动"),
             ("今日股市", "send_message", "今日股市"),
             ("持股", "send_message", "持股"),

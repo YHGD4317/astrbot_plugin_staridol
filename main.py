@@ -90,7 +90,7 @@ class StarIdolPlugin(Star):
             self.sender,
             interval=float(self._cfg("tick_interval", 20)),
             notify=bool(self._cfg("notify_on_finish", True)),
-            notify_mode=str(self._cfg("notify_mode", "push_first")),
+            notify_mode=str(self._cfg("notify_mode", "always_queue")),
             logger=self.logger,
         )
         self.scheduler.start()

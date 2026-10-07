@@ -183,7 +183,10 @@ def plan_project(
     name: str,
     duration: int | None = None,
 ) -> Result:
-    """自行筹划并立项。"""
+    """自行筹划并立项。时长不再由玩家指定：立项后随机 1~8 小时。
+
+    ``duration`` 参数保留仅为兼容旧调用方，实际总是忽略，改为随机生成。
+    """
     if ptype not in C.PROJECT_TYPES:
         return Result.fail(
             "没有「" + str(ptype) + "」这种项目类型。可选：" + "、".join(C.PROJECT_TYPES)
@@ -199,9 +202,8 @@ def plan_project(
             f"资金不足：筹划《{name}》需要 {U.fmt_money(invest)}，"
             f"你当前有 {U.fmt_money(player.money)}。"
         )
-    if duration is None:
-        duration = random.randint(*info.duration)
-    duration = max(1, min(24, int(duration)))
+    # 删除玩家指定时长：立项后随机 1~8 小时
+    duration = random.randint(1, 8)
 
     final_name = unique_project_name(player, name)
     renamed = final_name != name
