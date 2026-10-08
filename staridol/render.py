@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import random
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from . import constants as C
 from . import utils as U
@@ -109,6 +111,94 @@ def artist_status_block(artist: Artist, ts: float | None = None) -> str:
     stamina = max(0, min(100, artist.stamina))
     bar = U.progress_bar(stamina, 100)
     return f"{bar} {stamina}/100　{artist.status_line(ts)}"
+
+
+# --------------------------------------------------------------------------
+# 艺人活动措辞（参加项目 / 空闲动态）
+# --------------------------------------------------------------------------
+
+#: 各项目类型参加时的随机措辞。键为 ProjectType.name，值为可选动词列表。
+PROJECT_ACTIVITY_VERBS: dict[str, list[str]] = {
+    "歌曲": ["演唱", "录制", "献唱", "录制单曲"],
+    "MV": ["拍摄", "录制", "拍摄单曲MV"],
+    "演唱会": ["彩排", "演唱", "排练演唱会"],
+    "音乐剧": ["排练", "演出", "参演"],
+    "电视剧": ["拍摄", "参演", "出演"],
+    "电影": ["拍摄", "参演", "出演"],
+    "综艺": ["录制", "参加", "参与"],
+    "真人秀": ["录制", "参加", "参与"],
+    "访谈": ["录制", "参加", "参与"],
+    "演讲": ["开讲", "参加", "进行演讲"],
+    "舞台剧": ["排练", "演出", "参演"],
+    "模特秀": ["走秀", "参加", "拍摄"],
+}
+
+
+def project_activity_verb(ptype: str, ts: float | None = None) -> str:
+    """为项目类型随机选择一个活动动词，使状态措辞不固定。"""
+    verbs = PROJECT_ACTIVITY_VERBS.get(ptype, ["参加"])
+    ts = ts if ts is not None else U.now()
+    rnd = random.Random(f"verb-{ts // 300}-{ptype}")
+    return rnd.choice(verbs)
+
+
+#: 空闲动态：按时段模拟艺人的日常作息（小时区间 -> 活动池）。
+_IDLE_SCHEDULE: list[tuple[tuple[int, int], list[str]]] = [
+    ((0, 6), ["正在熟睡", "睡得正香", "做着美梦", "蜷在被窝里睡着"]),
+    ((6, 8), ["正在晨跑", "正在洗漱", "在吃早餐", "在阳台做早锻炼"]),
+    ((8, 11), ["在看剧本", "在研究新歌", "在健身房里", "在和经纪人通电话", "在刷练习视频"]),
+    ((11, 13), ["在吃午饭", "在午休", "和同事在餐厅吃饭"]),
+    ((13, 14), ["正在午睡", "在沙发上打盹", "在休息室眯一会儿"]),
+    ((14, 18), ["在练舞", "在排练", "在和编曲老师沟通", "在摄影棚试镜", "在背台词"]),
+    ((18, 20), ["在吃晚饭", "在小区里散步", "去便利店买东西"]),
+    ((20, 23), ["在刷手机", "在打游戏", "在追剧", "在和粉丝直播聊天", "在听新歌"]),
+    ((23, 24), ["在洗漱", "在敷面膜", "准备睡觉了"]),
+]
+
+#: 闲时与他人一起进行的活动。
+_PARTNER_ACTIVITIES: list[str] = [
+    "一起逛街", "一起去吃夜宵", "一起看电影", "一起打游戏",
+    "一起喝奶茶", "一起去爬山", "一起约饭", "一起去超市",
+]
+
+
+def _idle_slot_key(ts: float) -> tuple:
+    """把时间映射到时段的稳定 key，同一时段内状态固定、跨时段会刷新。"""
+    dt = datetime.fromtimestamp(ts)
+    return (dt.strftime("%Y%m%d"), dt.hour, dt.minute // 20)
+
+
+def idle_scene(artist: Artist, ts: float | None = None, peers: list[Artist] | None = None) -> str:
+    """为空闲艺人生成动态描述，如「空闲中（正在拼乐高）」或「空闲中（和王五一起逛街中）」。
+
+    ``peers`` 为同批空闲的其他艺人；会尽量让两名空闲艺人形成互相对应的联动活动。
+    """
+    ts = ts if ts is not None else U.now()
+    slot = _idle_slot_key(ts)
+    hour = datetime.fromtimestamp(ts).hour
+    base = "在休息"
+    for (lo, hi), pool in _IDLE_SCHEDULE:
+        if lo <= hour < hi:
+            base = pool[0]
+            break
+
+    # 同伴联动：按时段确定性配对，保证两名艺人描述互相对应
+    peer_artists = [p for p in (peers or []) if p.aid != artist.aid and p is not artist]
+    if len(peer_artists) >= 1:
+        partner_key = (slot[0], slot[1], slot[2])
+        all_ids = sorted([artist.aid] + [p.aid for p in peer_artists])
+        rnd = random.Random(f"pair-{partner_key}-{'-'.join(all_ids)}")
+        if rnd.random() < 0.45:
+            partner = rnd.choice(peer_artists)
+            act = rnd.choice(_PARTNER_ACTIVITIES)
+            return f"空闲中（和{partner.name}{act}）"
+
+    rnd = random.Random(f"idle-{slot[0]}-{slot[1]}:{slot[2]}-{artist.aid}")
+    for (lo, hi), pool in _IDLE_SCHEDULE:
+        if lo <= hour < hi:
+            base = rnd.choice(pool)
+            break
+    return f"空闲中（{base}）"
 
 
 def player_asset_block(player: Player, tier: C.TierInfo | None = None) -> str:
@@ -291,11 +381,18 @@ def render_artist_panel(artist: Artist) -> Card:
 
 
 def render_staff_list(player: Player) -> Card:
-    """员工列表：每名艺人展示等级、体力与最高四项属性，并提供一键填入空闲艺人的按钮。"""
+    """员工名册：每名艺人展示「【等级】姓名（体力/100）：前四项高属性」与动态状态。
+
+    状态措辞：参加项目时按类型随机（演唱/参演/拍摄/录制…）；空闲时展示按时段
+    模拟的作息动态，并可与另一名空闲艺人形成联动。所有状态均不展示剩余时长。
+    仅空闲状态自然恢复体力。
+    """
     #: 一键填入的空闲艺人上限（与单个项目最多投放人数一致）
     MAX_IDLE = 6
-    lines = [f"# {player.company_name or '集团'} · 员工名册（{len(player.artists)}）"]
+    ts = U.now()
+    idle_set = [a for a in player.artists if not a.is_busy(ts)]
     idle_names: list[str] = []
+    lines = [f"# {player.company_name or '集团'} · 员工名册（{len(player.artists)}）"]
     if player.artists:
         for artist in player.artists:
             top4 = sorted(
@@ -304,10 +401,14 @@ def render_staff_list(player: Player) -> Card:
                 reverse=True,
             )[:4]
             attrs_text = "·".join(f"{cn}{value}" for cn, value in top4)
-            lines.append(f"{artist.level}：{artist.name}（{artist.stamina}/100）：{attrs_text}")
-            lines.append(artist.status_line())
-            if not artist.is_busy() and len(idle_names) < MAX_IDLE:
-                idle_names.append(artist.name)
+            lines.append(f"【{artist.level}】{artist.name}（{artist.stamina}/100）：{attrs_text}")
+            if artist.is_busy(ts):
+                # 仅展示活动措辞与预计结束，不展示剩余时长
+                lines.append(f"　{artist.status_line(ts)}")
+            else:
+                lines.append(f"　{idle_scene(artist, ts, idle_set)}")
+                if len(idle_names) < MAX_IDLE:
+                    idle_names.append(artist.name)
     else:
         lines.append("暂无艺人，发送「今日秀场」开始招募。")
     lines.append("")
@@ -418,6 +519,33 @@ def render_check_result(
 # --------------------------------------------------------------------------
 
 
+def project_attr_label(ptype: str) -> str:
+    """项目类型附带鉴定属性，例如「歌曲（口才·唱功·艺术·情商）」。"""
+    info = C.PROJECT_TYPES.get(ptype)
+    if not info:
+        return ptype
+    cn = (C.ARTIST_ATTR_CN.get(str(k), str(k)) for k in info.artist_attrs)
+    return f"{ptype}（{'·'.join(cn)}）"
+
+
+def artist_score_calc(artist: Artist, ptype: str) -> str:
+    """单个艺人的评分计算展示，例如 「[(口才78+唱功65+艺术70+情商60)/4]/100=0.7」。"""
+    info = C.PROJECT_TYPES.get(ptype)
+    keys = info.artist_attrs if info else ("acting",)
+    cn = [C.ARTIST_ATTR_CN.get(str(k), str(k)) for k in keys]
+    values = [artist.get(k) for k in keys]
+    total = sum(values)
+    terms = "+".join(f"{c}{v}" for c, v in zip(cn, values))
+    gain = U.round_score(total / max(1, len(keys)) / 100)
+    return f"[({terms})/{len(keys)}]/100={U.fmt_score(gain)}"
+
+
+def project_artist_names(player: Player, project: Project) -> list[str]:
+    """把项目中的艺人 ID 映射为姓名（找不到时保留原 ID 以免信息丢失）。"""
+    name_map = {a.aid: a.name for a in player.artists}
+    return [name_map.get(aid, aid) for aid in project.artists]
+
+
 def render_project_panel(player: Player) -> Card:
     """项目总览。"""
     lines = ["# 项目面板"]
@@ -434,8 +562,13 @@ def render_project_panel(player: Player) -> Card:
         lines.append(f"　{project.progress_line()}")
         if project.artists:
             lines.append(
-                f"　参与艺人：{'、'.join(project.artists)}　已发薪资 {U.fmt_money(project.salary_paid)}"
+                f"　参与艺人：{'、'.join(project_artist_names(player, project))}　"
+                f"已发薪资 {U.fmt_money(project.salary_paid)}"
             )
+            for aid in project.artists:
+                artist = next((a for a in player.artists if a.aid == aid), None)
+                if artist is not None:
+                    lines.append(f"　　{artist.name}：{artist_score_calc(artist, project.ptype)}")
         else:
             lines.append("　尚未投放艺人（发送「艺人名参加项目名」）")
         lines.append("")

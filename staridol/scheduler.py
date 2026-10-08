@@ -128,7 +128,7 @@ class GameScheduler:
                                 Card(
                                     markdown=(
                                         f"# 体力透支\n"
-                                        f"**{artist.name}** 在《{artist.status_text}》中已耗尽体力"
+                                        f"**{artist.name}** {artist.status_text}期间已耗尽体力"
                                         f"（0/100）。\n\n"
                                         "拍摄仍会继续，但结束后记得安排休息。"
                                     )

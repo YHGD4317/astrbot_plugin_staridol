@@ -327,13 +327,13 @@ class ProjectType:
 #: 项目类型表
 PROJECT_TYPES: dict[str, ProjectType] = {
     "电视剧": ProjectType(
-        "电视剧", "影视", "decision", ("acting", "eloquence", "martial", "art"), (5, 9), (300, 3000), 12
+        "电视剧", "影视", "decision", ("acting", "eloquence", "martial", "iq"), (5, 9), (300, 3000), 12
     ),
     "电影": ProjectType(
         "电影", "影视", "decision", ("acting", "eloquence", "martial", "art"), (4, 8), (500, 5000), 10
     ),
     "歌曲": ProjectType(
-        "歌曲", "音乐", "decision", ("singing", "singing", "art", "eq"), (2, 4), (100, 1200), 12
+        "歌曲", "音乐", "decision", ("singing", "eloquence", "art", "eq"), (2, 4), (100, 1200), 12
     ),
     "模特秀": ProjectType(
         "模特秀", "舞台", "decision", ("dance", "art", "eq", "iq"), (2, 3), (100, 800), 8
@@ -342,25 +342,25 @@ PROJECT_TYPES: dict[str, ProjectType] = {
         "舞台剧", "舞台", "decision", ("acting", "singing", "dance", "eloquence"), (3, 6), (200, 1500), 8
     ),
     "综艺": ProjectType(
-        "综艺", "节目", "decision", ("eq", "iq", "martial", "art"), (3, 6), (300, 2000), 12
+        "综艺", "节目", "decision", ("eq", "iq", "martial", "dance"), (3, 6), (300, 2000), 12
     ),
     "演讲": ProjectType(
         "演讲", "节目", "eloquence", ("eloquence", "eq", "iq", "art"), (1, 2), (50, 600), 7
     ),
     "访谈": ProjectType(
-        "访谈", "节目", "eloquence", ("eloquence", "eq", "iq", "art"), (1, 2), (50, 500), 7
+        "访谈", "节目", "eloquence", ("eloquence", "eq", "iq", "martial"), (1, 2), (50, 500), 7
     ),
     "真人秀": ProjectType(
-        "真人秀", "节目", "eloquence", ("eq", "iq", "martial", "art"), (3, 5), (300, 2500), 9
+        "真人秀", "节目", "eloquence", ("acting", "iq", "martial", "dance"), (3, 5), (300, 2500), 9
     ),
     "演唱会": ProjectType(
         "演唱会", "音乐", "eloquence", ("singing", "dance", "eq", "art"), (2, 4), (500, 4000), 8
     ),
     "音乐剧": ProjectType(
-        "音乐剧", "舞台", "eloquence", ("singing", "acting", "dance", "art"), (4, 7), (400, 3000), 8
+        "音乐剧", "舞台", "eloquence", ("singing", "acting", "dance", "eq"), (4, 7), (400, 3000), 8
     ),
     "MV": ProjectType(
-        "MV", "音乐", "eloquence", ("dance", "singing", "art", "acting"), (2, 3), (100, 900), 6
+        "MV", "音乐", "eloquence", ("dance", "singing", "acting", "art"), (2, 3), (100, 900), 6
     ),
 }
 

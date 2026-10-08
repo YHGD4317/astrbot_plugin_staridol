@@ -321,10 +321,18 @@ class GameStore:
         return name
 
     def tier_info(self, player: Player) -> C.TierInfo:
-        """统计玩家当前的资产档位（只增不减）。"""
+        """统计玩家当前的资产档位（只增不减）。
+
+        档位每提升一级，除每日事务 +1 外，今日秀场与商业活动的每日可用次数
+        也同步 +1（提升后立即补到今日可用次数中）。
+        """
         info = C.tier_of(player.total_asset, self.base_quest)
         if info.tier > player.asset_tier:
+            delta = info.tier - player.asset_tier
             player.asset_tier = info.tier
+            # 档位提升时同步给今日秀场 / 商业活动各 +1
+            player.show_left += delta
+            player.market_left += delta
             self.mark_dirty()
         return C.TierInfo(
             tier=player.asset_tier,
@@ -336,6 +344,14 @@ class GameStore:
             quest_count=self.base_quest + player.asset_tier,
             reward_multiplier=1.0 + player.asset_tier * 0.35,
         )
+
+    def show_total(self, player: Player) -> int:
+        """当前每日秀场可用次数：基础次数 + 已达档位数。"""
+        return int(self.show_refresh) + int(player.asset_tier)
+
+    def market_total(self, player: Player) -> int:
+        """当前每日商业活动可用次数：基础次数 + 已达档位数。"""
+        return int(self.market_refresh) + int(player.asset_tier)
 
     # ------------------------------------------------------------------
     # 备份

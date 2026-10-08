@@ -97,7 +97,8 @@ def ensure_daily_market(store: GameStore, player: Player, ts: float | None = Non
     today = U.today_str(ts)
     if player.market_date != today:
         player.market_date = today
-        player.market_left = store.market_refresh
+        # 每日商业活动次数 = 基础次数 + 已达资产档位数
+        player.market_left = store.market_refresh + player.asset_tier
         player.market = []
         store.mark_dirty()
 
@@ -117,7 +118,7 @@ def refresh_market(
     ts = ts if ts is not None else U.now()
     if force:
         player.market_date = U.today_str(ts)
-        player.market_left = store.market_refresh
+        player.market_left = store.market_refresh + player.asset_tier
     ensure_daily_market(store, player, ts)
     if consume:
         if player.market_left <= 0:
@@ -316,7 +317,7 @@ def join_project(store: GameStore, player: Player, names: list[str], project_nam
         project.salary_paid += salary
         artist.status = C.STATUS_PROJECT
         artist.project_id = project.pid
-        artist.status_text = f"参加《{project.name}》中"
+        artist.status_text = f"{R.project_activity_verb(project.ptype)}《{project.name}》中"
         artist.busy_until = project.end_at
         artist.stamina_at = ts
         artist.project_stamina_at = ts
@@ -336,10 +337,10 @@ def join_project(store: GameStore, player: Player, names: list[str], project_nam
     total_salary = sum(s for _, s, _ in added)
     lines.append(f"**加入艺人**：{'、'.join(a.name for a, _, _ in added)}")
     lines.append(f"**发放薪资**：共 {U.fmt_money(total_salary)}（{salary_text}）")
-    for artist, _, gain in added:
+    for artist, _, _gain in added:
         lines.append(
-            f"- {artist.name}　评分 +{U.fmt_score(gain)}　体力 {artist.stamina}/100"
-            f"（每小时消耗 {C.PROJECT_STAMINA_PER_HOUR} 点）"
+            f"- {artist.name}：{R.artist_score_calc(artist, project.ptype)}"
+            f"　体力 {artist.stamina}/100（每小时消耗 {C.PROJECT_STAMINA_PER_HOUR} 点）"
         )
     lines.append("")
     lines.append(

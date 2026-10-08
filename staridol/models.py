@@ -94,13 +94,12 @@ class Artist:
         return self.status != C.STATUS_IDLE and self.busy_until > ts
 
     def status_line(self, ts: float | None = None) -> str:
-        """一行式状态描述。"""
+        """一行式状态描述（精简：不展示剩余时长）。"""
         ts = ts if ts is not None else U.now()
         if not self.is_busy(ts):
             return "待命中"
-        left = U.fmt_duration(self.busy_until - ts)
         base = self.status_text or C.STATUS_CN.get(self.status, "忙碌中")
-        return f"{base}（预计 {U.fmt_clock(self.busy_until)} 结束，剩余 {left}）"
+        return f"{base}（预计 {U.fmt_clock(self.busy_until)} 结束）"
 
     def level_up_ready(self) -> str | None:
         """检查是否可以晋升，返回可晋升到的等级。"""

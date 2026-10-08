@@ -20,8 +20,14 @@ from ..store import GameStore
 # 体力
 # --------------------------------------------------------------------------
 def regen_stamina(artist: Artist, ts: float | None = None) -> int:
-    """按时间自然恢复体力，返回恢复量。"""
+    """按时间自然恢复体力，返回恢复量。
+
+    只有空闲（idle）状态才会自然恢复体力；训练 / 休息 / 参加项目等
+    忙碌状态下不触发自然恢复。
+    """
     ts = ts if ts is not None else U.now()
+    if artist.status != C.STATUS_IDLE:
+        return 0
     if artist.stamina >= 100:
         artist.stamina_at = ts
         return 0
@@ -209,7 +215,8 @@ def ensure_daily_show(store: GameStore, player: Player, ts: float | None = None)
     today = U.today_str(ts)
     if player.show_date != today:
         player.show_date = today
-        player.show_left = store.show_refresh
+        # 每日秀场次数 = 基础次数 + 已达资产档位数
+        player.show_left = store.show_refresh + player.asset_tier
         player.show_pool = []
         store.mark_dirty()
 
@@ -238,7 +245,7 @@ def refresh_show(store: GameStore, player: Player) -> Result:
     store.record_names(fresh)
     player.show_pool = pool
     store.mark_dirty()
-    return Result.success(card=R.render_show_pool(player, store.show_refresh))
+    return Result.success(card=R.render_show_pool(player, store.show_total(player)))
 
 
 def hire(store: GameStore, player: Player, name: str) -> Result:
