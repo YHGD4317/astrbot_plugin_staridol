@@ -291,20 +291,32 @@ def render_artist_panel(artist: Artist) -> Card:
 
 
 def render_staff_list(player: Player) -> Card:
-    """员工列表。"""
+    """员工列表：每名艺人展示等级、体力与最高四项属性，并提供一键填入空闲艺人的按钮。"""
+    #: 一键填入的空闲艺人上限（与单个项目最多投放人数一致）
+    MAX_IDLE = 6
     lines = [f"# {player.company_name or '集团'} · 员工名册（{len(player.artists)}）"]
-    if not player.artists:
-        lines.append("暂无艺人，发送「今日秀场」开始招募。")
+    idle_names: list[str] = []
+    if player.artists:
+        for artist in player.artists:
+            top4 = sorted(
+                ((cn, artist.get(key)) for cn, key in C.ARTIST_ATTRS.items()),
+                key=lambda item: item[1],
+                reverse=True,
+            )[:4]
+            attrs_text = "·".join(f"{cn}{value}" for cn, value in top4)
+            lines.append(f"{artist.level}：{artist.name}（{artist.stamina}/100）：{attrs_text}")
+            lines.append(artist.status_line())
+            if not artist.is_busy() and len(idle_names) < MAX_IDLE:
+                idle_names.append(artist.name)
     else:
-        for index, artist in enumerate(player.artists, 1):
-            lines.append(
-                f"{index}. **{artist.name}**（{artist.level}）体力 {artist.stamina}/100　"
-                f"均属性 {artist.avg_attr:.0f}　粉丝 {U.fmt_number(artist.fans)}"
-            )
-            lines.append(f"　　{artist.status_line()}")
+        lines.append("暂无艺人，发送「今日秀场」开始招募。")
     lines.append("")
     lines.append("发送「查询艺人名」查看详细面板")
-    return Card(markdown="\n".join(lines))
+    buttons: list[list[tuple[str, str]]] = []
+    if idle_names:
+        lines.append("点击「呼叫空闲艺人」可一键把空闲艺人填入输入框，方便分组参加项目。")
+        buttons = [[button("呼叫空闲艺人", "、".join(idle_names))]]
+    return Card(markdown="\n".join(lines)).with_buttons(buttons)
 
 
 # --------------------------------------------------------------------------
