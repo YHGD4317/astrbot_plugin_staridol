@@ -561,14 +561,19 @@ def render_project_panel(player: Player) -> Card:
         )
         lines.append(f"　{project.progress_line()}")
         if project.artists:
-            lines.append(
-                f"　参与艺人：{'、'.join(project_artist_names(player, project))}　"
-                f"已发薪资 {U.fmt_money(project.salary_paid)}"
-            )
+            # 紧凑展示：艺人名（增加的评分），如 张三（0.6）、李四（0.4）
+            parts = []
             for aid in project.artists:
                 artist = next((a for a in player.artists if a.aid == aid), None)
                 if artist is not None:
-                    lines.append(f"　　{artist.name}：{artist_score_calc(artist, project.ptype)}")
+                    score = U.fmt_score(project.artist_scores.get(aid, 0.0))
+                    parts.append(f"{artist.name}（{score}）")
+                else:
+                    parts.append(aid)
+            lines.append(
+                f"　参与艺人：{'、'.join(parts)}　"
+                f"已发薪资 {U.fmt_money(project.salary_paid)}"
+            )
         else:
             lines.append("　尚未投放艺人（发送「艺人名参加项目名」）")
         lines.append("")

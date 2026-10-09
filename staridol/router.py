@@ -463,8 +463,8 @@ class Router:
             card=R.render_player_panel(
                 player,
                 self.store.tier_info(player),
-                self.store.show_refresh,
-                self.store.market_refresh,
+                self.store.show_total(player),
+                self.store.market_total(player),
                 holding_value,
                 player.notice_count(),
             )
@@ -576,7 +576,7 @@ class Router:
         result = project_sys.refresh_market(self.store, player)
         if not result.ok:
             return result
-        return Result.success(card=R.render_market(player, self.store.market_refresh))
+        return Result.success(card=R.render_market(player, self.store.market_total(player)))
 
     async def _cmd_project_panel(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         if not player.points_assigned:
