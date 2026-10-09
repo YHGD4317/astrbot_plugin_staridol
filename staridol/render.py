@@ -106,11 +106,10 @@ def artist_attr_block(artist: Artist, compact: bool = False) -> str:
 
 
 def artist_status_block(artist: Artist, ts: float | None = None) -> str:
-    """艺人体力条与状态。"""
+    """艺人当前体力与状态。"""
     ts = ts if ts is not None else U.now()
     stamina = max(0, min(100, artist.stamina))
-    bar = U.progress_bar(stamina, 100)
-    return f"{bar} {stamina}/100　{artist.status_line(ts)}"
+    return f"体力 {stamina}/100　{artist.status_line(ts)}"
 
 
 # --------------------------------------------------------------------------

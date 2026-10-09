@@ -239,10 +239,34 @@ async def main() -> None:
     invest_proj = player.projects[-1]
     old_score = invest_proj.score
     old_invest = invest_proj.invest
+
+    # 追加投资判定（财商/决策）的四种结果资金去向
+    def _mk_check(crit_success, success, crit_fail):
+        return U.CheckResult(
+            attr_name="财商", attr_value=100, base_value=100,
+            roll=0, upper=100, success=success,
+            crit_success=crit_success, crit_fail=crit_fail, margin=0,
+        )
+
+    # 大成功：全额 + 随机额外比例
+    pay, added, lost_g, extra = P._invest_outcome(_mk_check(True, True, False), 3000, old_invest, 99999)
+    check(pay == added and added >= 3000 and extra >= 300 and extra <= 1800,
+          "大成功全额投资并额外追加比例", f"pay={pay},extra={extra}")
+    # 成功：全额
+    pay, added, lost_g, extra = P._invest_outcome(_mk_check(False, True, False), 3000, old_invest, 99999)
+    check(pay == 3000 and added == 3000 and lost_g == 0 and extra == 0, "成功全额投资")
+    # 普通失败：被扣除随机比例，剩余落实
+    pay, added, lost_g, extra = P._invest_outcome(_mk_check(False, False, False), 3000, old_invest, 99999)
+    check(pay == 3000 and added + lost_g == 3000 and 0 < lost_g < 3000 and extra == 0,
+          "普通失败扣除随机比例、剩余落实", f"lost={lost_g},added={added}")
+    # 大失败：本笔全部扣光
+    pay, added, lost_g, extra = P._invest_outcome(_mk_check(False, False, True), 3000, old_invest, 99999)
+    check(pay == 3000 and added == 0 and lost_g == 3000 and extra == 0, "大失败本笔全部扣光")
+
     result = P.add_investment(store, player, "追加测试", 3000)
-    check(result.ok and invest_proj.invest == old_invest + 3000, "业主追加投资增加总投资", result.text)
-    check(invest_proj.score > old_score, "追加投资提高评分", f"{old_score}->{invest_proj.score}")
-    check(invest_proj.investor_funds.get(player.uid) == 1000 + 3000, "业主份额累加")
+    check(result.ok, "业主追加投资成功", result.text)
+    check(invest_proj.invest != old_invest, "追加投资改变总投资", f"{old_invest}->{invest_proj.invest}")
+    check(invest_proj.investor_funds.get(player.uid) > 0, "业主份额已记账")
 
     other = store.create_player("20002", "路人甲")
     result = P.add_investment(store, other, "追加测试", 500)
@@ -251,8 +275,8 @@ async def main() -> None:
     cash_other = other.cash
     result = P.add_investment(store, other, "追加测试", 500)
     check(result.ok, "其他玩家追加成功", result.text)
-    check(invest_proj.investor_funds.get(other.uid) == 500, "其他玩家份额记账")
-    check(other.cash == cash_other - 500, "其他玩家现金扣减")
+    check(invest_proj.investor_funds.get(other.uid) > 0, "其他玩家份额记账")
+    check(other.cash <= cash_other and other.cash < cash_other, "其他玩家现金扣减")
     check(invest_proj.open_invest, "项目保持开放")
     check(P.close_project_investment(store, player, "追加测试").ok, "业主关闭投资")
     check(not P.add_investment(store, other, "追加测试", 100).ok, "关闭后其他玩家不可追加")

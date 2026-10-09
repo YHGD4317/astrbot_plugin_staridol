@@ -563,11 +563,55 @@ def find_project_for_invest(store: GameStore, player: Player, name: str) -> tupl
     return None, None, False
 
 
+def _invest_outcome(
+    check: U.CheckResult, amount: int, old_invest: int, extra_budget: int
+) -> tuple[int, int, int, int]:
+    """根据一次追加投资判定，计算资金的最终去向（纯计算，不改变任何状态）。
+
+    ``extra_budget`` 为本次追加“大成功”时可额外动用的资金上限（由调用方传入）。
+
+    返回 ``(pay_total, added, lost, extra)``：
+      * ``pay_total``：本次实际从玩家扣款的金额；
+      * ``added``：实际落实到项目投资中的金额；
+      * ``lost``：因失败被扣除（亏损）的钱款；
+      * ``extra``：大成功时额外追加的投资。
+
+    规则（与其他判定一致）：
+      * **大成功**：全额投资，并额外追加随机比例的投资（受可支付资金约束）；
+      * **成功**：全额投资；
+      * **普通失败**：款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
+      * **大失败**：本笔全部扣光（loss=amount、added=0），并可能缩减原有投资（由调用方处理）。
+    """
+    extra = 0
+    lost = 0
+    if check.crit_success:
+        extra = int(round(amount * random.uniform(*C.INVEST_EXTRA_RATIO_RANGE)))
+        extra = max(0, min(extra, extra_budget))
+        pay_total = amount + extra
+        added = pay_total
+    elif check.success:
+        pay_total = amount
+        added = amount
+    elif check.crit_fail:
+        pay_total = amount
+        added = 0
+        lost = amount
+    else:
+        loss_ratio = random.uniform(*C.INVEST_LOSS_RATIO_RANGE)
+        lost = min(int(amount * loss_ratio), amount)
+        pay_total = amount
+        added = amount - lost
+    return pay_total, added, lost, extra
+
+
 def add_investment(store: GameStore, player: Player, project_name: str, amount: int) -> Result:
     """追加项目投资，提高投资额与项目评分。
 
-    * 业主可直接追加自己名下未结束的项目；
-    * 其他玩家仅当项目已开放投资时才能追加，追加同样提高评分；
+    * 追加前随机进行「财商」或「决策」判定（判定规则与其他判定一致）；
+    * **大成功**：全额投资并额外追加随机比例的投资；
+    * **普通失败**：款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
+    * **大失败**：本笔全部亏损，并缩减原有项目投资、降低对应评分；
+    * 业主可直接追加自己名下未结束的项目；其他玩家仅当项目已开放投资时才能追加；
     * 收益在项目结算时按各方投入的资金比例分配。
     """
     project_name = (project_name or "").strip().strip("《》")
@@ -594,26 +638,73 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
         return Result.fail(f"《{project.name}》状态为 {project.status}，无法追加投资。")
 
     old_invest = project.invest
-    new_invest = old_invest + amount
-    player.pay(amount)
-    project.invest = new_invest
-    project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + amount
-    score_add = _production_delta(old_invest, new_invest)
-    project.score = U.round_score(max(C.MIN_SCORE, project.score + score_add))
+    # ---- 追加前的财商 / 决策判定（规则与其他判定一致）----
+    attr_cn = random.choice(C.INVEST_CHECK_ATTRS)  # 财商 或 决策
+    attr_key = C.PLAYER_ATTRS[attr_cn]
+    check = U.roll_check(attr_cn, player.attr(attr_key), player.buff_value("check"))
+    check_cn = check.describe()
+
+    pay_total, added, lost, extra = _invest_outcome(
+        check, amount, old_invest, max(0, int(player.money) - amount)
+    )
+    reduce_old = 0  # 大失败时缩减的原有项目投资
+
+    if check.crit_fail and added == 0:
+        # 大失败：除本笔全部扣光外，还缩减原有项目投资、降低对应评分
+        reduce_ratio = random.uniform(*C.INVEST_CRIT_FAIL_REDUCE_RANGE)
+        reduce_old = min(int(old_invest * reduce_ratio), old_invest)
+        if reduce_old > 0 and project.invest > 0:
+            reduce_old = min(reduce_old, project.invest)
+            new_invest = project.invest - reduce_old
+            ratio = new_invest / project.invest
+            for uid in project.investor_funds:
+                project.investor_funds[uid] = int(project.investor_funds[uid] * ratio)
+            project.invest = new_invest
+
+    player.pay(pay_total)
+    project.invest = project.invest + added
+    project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + added
+    _recompute_score(project)
     store.mark_dirty()
     if is_owner:
-        owner.push_log(f"为《{project.name}》追加投资 {U.fmt_money(amount)}")
+        owner.push_log(
+            f"为《{project.name}》追加投资 {U.fmt_money(pay_total)}"
+            f"（{attr_cn}判定：{check.level_cn}）"
+        )
     else:
-        owner.push_log(f"{player.name} 为《{project.name}》追加投资 {U.fmt_money(amount)}")
+        owner.push_log(
+            f"{player.name} 为《{project.name}》追加投资 {U.fmt_money(pay_total)}"
+            f"（{attr_cn}判定：{check.level_cn}）"
+        )
 
     share = int(project.investor_funds.get(player.uid, 0))
-    total = project.invest
-    percent = share / total * 100 if total else 0
+    total_invest = project.invest
+    percent = share / total_invest * 100 if total_invest else 0
+
+    if check.crit_success:
+        outcome = (
+            f"{attr_cn}判定**大成功**（{check_cn}）！投资 {U.fmt_money(amount)} 全额到位，"
+            f"行情看好额外追加 **{U.fmt_money(extra)}**，实际入账 {U.fmt_money(added)}。"
+        )
+    elif check.success:
+        outcome = f"{attr_cn}判定通过（{check_cn}），投资 {U.fmt_money(amount)} 全额到位。"
+    elif check.crit_fail:
+        outcome = (
+            f"{attr_cn}判定**大失败**（{check_cn}）！本笔投资 {U.fmt_money(lost)} 全部亏损，"
+            + (f"原有投资也被削减 {U.fmt_money(reduce_old)}，对应评分下降。" if reduce_old else "对应评分下降。")
+        )
+    else:
+        outcome = (
+            f"{attr_cn}判定未通过（{check_cn}），钱款因{random.choice(C.INVEST_FAIL_REASONS)}"
+            f"被扣除 {U.fmt_money(lost)}，剩余 {U.fmt_money(added)} 落实投资。"
+        )
+
     lines = [
-        "# 追加投资成功",
+        f"# 追加投资{'大成功' if check.crit_success else ('大失败' if check.crit_fail else '结果')}",
         f"**项目**：《{project.name}》（{project.ptype}）",
-        f"**追加**：{U.fmt_money(amount)}　**总投资**：{U.fmt_money(project.invest)}",
-        f"**评分**：{U.fmt_score(project.score)}（制作加成 +{U.fmt_score(score_add)}）",
+        outcome,
+        f"**实际扣款**：{U.fmt_money(pay_total)}　**入账投资**：{U.fmt_money(added)}　**总投资**：{U.fmt_money(project.invest)}",
+        f"**评分**：{U.fmt_score(project.score)}",
         f"**你的投入**：{U.fmt_money(share)}（占总资金 {percent:.1f}%）",
         "",
         "项目结算收益将按投入资金比例分配。",

@@ -24,6 +24,7 @@ from .qqcard import CardSender
 from .result import Result
 from .store import GameStore
 from .systems import artist as artist_sys
+from .systems import casino as casino_sys
 from .systems import daily as daily_sys
 from .systems import economy as eco_sys
 from .systems import project as project_sys
@@ -229,6 +230,24 @@ class Router:
             (re.compile(rf"^创建\s*(?P<type>{COMPANY_PATTERN})$"), "create_company"),
             (re.compile(r"^(?:收取分红|领取分红|分红)$"), "dividend"),
             (re.compile(r"^(?:今日股市|股市|股价)$"), "stock"),
+            # ---- 赌场 ----
+            (re.compile(r"^(?:赌场|进入赌场|赌场菜单|赌场玩法)$"), "casino_menu"),
+            (
+                re.compile(
+                    r"^(?:开始|玩)?\s*(?P<game>21点|黑杰克|猜大小|骰子大战|骰子对决|轮盘|轮盘赌|老虎机|拉霸机)"
+                    r"\s*(?P<chips>\d+)?\s*(?:个|枚|张)?\s*(?:筹码)?\s*$"
+                ),
+                "casino_start",
+            ),
+            (
+                re.compile(r"^(?P<verb>要牌|加牌|再来一张|停牌|够了|不要了|加倍|投降|弃牌|拉杆|再拉一次)$"),
+                "casino_verb",
+            ),
+            (
+                re.compile(r"^押?(?P<choice>大|小|单|双|红|黑|[0-9]{1,2})(?:点|号)?$"),
+                "casino_guess",
+            ),
+            (re.compile(r"^(?:离开赌场|结束赌局|兑换筹码|不玩了)$"), "casino_leave"),
             # ---- 管理（需管理员）----
             (re.compile(r"^(?:备份列表|存档列表)$"), "backup_list"),
             (re.compile(r"^立即备份$"), "backup_now"),
@@ -745,6 +764,39 @@ class Router:
 
     async def _cmd_dividend(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         return eco_sys.collect_dividend(self.store, player)
+
+    # ------------------------------------------------------------------
+    # 赌场
+    # ------------------------------------------------------------------
+    async def _cmd_casino_menu(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        return casino_sys.menu(player)
+
+    async def _cmd_casino_start(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.points_assigned:
+            return self._need_register(player)
+        key = casino_sys.resolve_game(match.group("game"))
+        if key is None:
+            return Result.fail("没有这个玩法。发送「赌场」查看可选玩法。")
+        chips = int(match.group("chips")) if match.group("chips") else 1
+        return casino_sys.start(self.store, player, key, chips)
+
+    async def _cmd_casino_verb(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.casino:
+            return Result.fail("你当前没有进行中的赌局，发送「赌场」选择玩法开局。")
+        return casino_sys.verb(self.store, player, match.group("verb"))
+
+    async def _cmd_casino_guess(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.casino:
+            return Result.fail("你当前没有进行中的赌局，发送「赌场」选择玩法开局。")
+        return casino_sys.guess(self.store, player, match.group("choice"))
+
+    async def _cmd_casino_leave(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.casino:
+            return Result.fail("你当前没有进行中的赌局。")
+        name = casino_sys.GAME_CN.get(player.casino.get("game", ""), "赌局")
+        player.casino.clear()
+        self.store.mark_dirty()
+        return Result.success(text=f"已结束当前「{name}」赌局，已下注的筹码不退还。")
 
     # ------------------------------------------------------------------
     # 管理

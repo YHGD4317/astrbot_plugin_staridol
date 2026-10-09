@@ -235,10 +235,7 @@ class Project:
         if self.status == C.PROJECT_PENDING:
             return "等待「项目开始」指令"
         if self.status == C.PROJECT_RUNNING:
-            total = max(1.0, self.end_at - self.start_at)
-            done = U.clamp(ts - self.start_at, 0, total)
-            bar = U.progress_bar(done, total)
-            return f"{bar} 剩余 {U.fmt_duration(self.time_left(ts))}（{U.fmt_clock(self.end_at)} 结束）"
+            return f"剩余 {U.fmt_duration(self.time_left(ts))}（{U.fmt_clock(self.end_at)} 结束）"
         if self.status == C.PROJECT_DONE:
             return f"已结束，最终评分 {U.fmt_score(self.score)}，收益 {U.fmt_signed(self.revenue - self.invest)}"
         return "已取消"
@@ -576,6 +573,7 @@ class Player:
     companies: list[Company] = field(default_factory=list)
     items: dict[str, int] = field(default_factory=dict)
     buffs: dict[str, float] = field(default_factory=dict)
+    casino: dict[str, Any] = field(default_factory=dict)  # 当前进行中的赌局状态
     last_quest_date: str = ""
     quest_total: int = 0
     show_date: str = ""
@@ -785,6 +783,7 @@ class Player:
                 for k, v in self.buffs.items()
                 for (exp, cnt) in [self._buff_entry(v)]
             },
+            "casino": self.casino,
             "last_quest_date": self.last_quest_date,
             "quest_total": self.quest_total,
             "show_date": self.show_date,
@@ -825,6 +824,7 @@ class Player:
         player.quests = [Quest.from_dict(x) for x in (data.get("quests") or [])]
         player.companies = [Company.from_dict(x) for x in (data.get("companies") or [])]
         player.items = _dict_to_int(data.get("items"))
+        player.casino = dict(data.get("casino") or {})
         player.buffs = {}
         for k, v in (data.get("buffs") or {}).items():
             key = str(k)

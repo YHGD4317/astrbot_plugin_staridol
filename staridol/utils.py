@@ -100,15 +100,6 @@ def round_score(score: float) -> float:
     return round(score + 1e-9, 1)
 
 
-def progress_bar(current: float, total: float, length: int = 10, fill: str = "▰", empty: str = "▱") -> str:
-    """生成进度条。"""
-    if total <= 0:
-        return fill * length
-    ratio = max(0.0, min(1.0, current / total))
-    filled = int(round(ratio * length))
-    return fill * filled + empty * (length - filled)
-
-
 # --------------------------------------------------------------------------
 # 随机
 # --------------------------------------------------------------------------
