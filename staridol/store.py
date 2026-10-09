@@ -327,15 +327,22 @@ class GameStore:
         也同步 +1（提升后立即补到今日可用次数中）。
         """
         info = C.tier_of(player.total_asset, self.base_quest)
-        if info.tier > player.asset_tier:
+        tier_raised = info.tier > player.asset_tier
+        if tier_raised:
             delta = info.tier - player.asset_tier
             player.asset_tier = info.tier
             # 档位提升时同步给今日秀场 / 商业活动各 +1
             player.show_left += delta
             player.market_left += delta
-            # 档位提升也同步提升每日事务数量：立即补发差额事务，无需等待次日刷新
+        # 核对并补发今日事务：目标条数 = 基础数量 + 已达档位数。
+        # 不依赖"本次新增档位数"，而是始终对比当前应有条数与实际持有条数，
+        # 一次性补齐差额（含历史升档漏发 / 存档回退后的追溯补发）。
+        target_quest = self.base_quest + player.asset_tier
+        lack = target_quest - len(player.quests)
+        if lack > 0:
             from .systems import quest as quest_sys
-            quest_sys.add_quests(self, player, delta)
+            quest_sys.add_quests(self, player, lack)
+        if tier_raised or lack > 0:
             self.mark_dirty()
         return C.TierInfo(
             tier=player.asset_tier,
