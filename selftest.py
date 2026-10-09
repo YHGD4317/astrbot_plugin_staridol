@@ -231,6 +231,86 @@ async def main() -> None:
     big_artist.attrs = {k: 200 for k in C.ARTIST_ATTRS.values()}
     check(P.calc_artist_score(big_artist, "电视剧") == 2.0, "单项艺人加分可超过 1.0", str(P.calc_artist_score(big_artist, "电视剧")))
 
+    # ------------------------------------------------------------ 追加投资 / 开放项目投资
+    print("\n=== 8.5 追加投资与开放项目投资 ===")
+    player.cash = 100000
+    pr = P.plan_project(store, player, 1000, "综艺", "追加测试")
+    check(pr.ok, "立项成功")
+    invest_proj = player.projects[-1]
+    old_score = invest_proj.score
+    old_invest = invest_proj.invest
+    result = P.add_investment(store, player, "追加测试", 3000)
+    check(result.ok and invest_proj.invest == old_invest + 3000, "业主追加投资增加总投资", result.text)
+    check(invest_proj.score > old_score, "追加投资提高评分", f"{old_score}->{invest_proj.score}")
+    check(invest_proj.investor_funds.get(player.uid) == 1000 + 3000, "业主份额累加")
+
+    other = store.create_player("20002", "路人甲")
+    result = P.add_investment(store, other, "追加测试", 500)
+    check(not result.ok, "未开放时其他玩家不能追加")
+    check(P.open_project_investment(store, player, "追加测试").ok, "业主开放投资")
+    cash_other = other.cash
+    result = P.add_investment(store, other, "追加测试", 500)
+    check(result.ok, "其他玩家追加成功", result.text)
+    check(invest_proj.investor_funds.get(other.uid) == 500, "其他玩家份额记账")
+    check(other.cash == cash_other - 500, "其他玩家现金扣减")
+    check(invest_proj.open_invest, "项目保持开放")
+    check(P.close_project_investment(store, player, "追加测试").ok, "业主关闭投资")
+    check(not P.add_investment(store, other, "追加测试", 100).ok, "关闭后其他玩家不可追加")
+
+    # 结算按比例分配
+    total_for_share = invest_proj.invest
+    revenue = P.calc_revenue(invest_proj.invest, invest_proj.score)
+    owner_expected = int(revenue * invest_proj.investor_funds[player.uid] // total_for_share)
+    other_expected = int(revenue * invest_proj.investor_funds[other.uid] // total_for_share)
+    other_cash_before = other.cash
+    owner_cash_before = player.cash
+    invest_proj.end_at = U.now() - 1
+    invest_proj.artists = []  # 无艺人参与，结算更干净
+    P.settle_project(store, player, invest_proj)
+    check(other.cash == other_cash_before + other_expected, "其他玩家获得分成", f"{other_expected}")
+    check(player.cash == owner_cash_before + owner_expected, "业主获得分成", f"{owner_expected}")
+
+    # ------------------------------------------------------------ 艺人等级按薪资计入总资产
+    print("\n=== 8.6 艺人等级按薪资计入总资产 ===")
+    pa = Artist(aid="pa", name="薪资甲", level="素人")
+    pb = Artist(aid="pb", name="薪资乙", level="素人")
+    player.artists.extend([pa, pb])
+    cash_before = player.cash
+    base_asset = player.total_asset
+    # 素人薪资 5w ×2 = 10w
+    check((pa.value + pb.value) == 5 + 5, "素人按薪资 5w 计, 合计 10w", f"{pa.value}+{pb.value}")
+    pb.level = "五线"
+    check(pa.value + pb.value == 5 + 20, "升级五线后 5+20=25w", f"{pa.value}+{pb.value}")
+
+    # ------------------------------------------------------------ 批量解聘 / 批量使用道具
+    print("\n=== 8.7 批量解聘与批量使用道具 ===")
+    fire_names = [pa.name, pb.name]
+    before_fire = len(player.artists)
+    fire_res = A.fire(store, player, fire_names)
+    check(fire_res.ok, "批量解聘成功", fire_res.text)
+    check(all(a.name not in fire_names for a in player.artists), "批量解聘后艺人均被移除")
+    check(len(player.artists) == before_fire - 2, "解聘数量正确")
+    # 解雇与解聘同一入口（路由层已覆盖）
+    # 批量使用同类道具，效果叠加
+    player.buffs.clear()  # 清空已有增益，保证叠加断言确定
+    player.items["幸运符"] = 3
+    res = E.use_item(store, player, "幸运符", count=2)
+    check(res.ok, "批量使用道具成功", res.text)
+    check(player.items["幸运符"] == 1, "批量使用扣减背包")
+    check(player.buff_value("check") == 30, "批量使用幸运符效果叠加为 +30", str(player.buff_value("check")))
+    before_val = player.buff_value("check")
+    res = E.use_item(store, player, "幸运符")  # 再叠一个，当前 buff 未过期
+    check(player.buff_value("check") == before_val + 15, "未过期时继续叠加", f"{before_val}->{player.buff_value('check')}")
+    player.items["能量饮料"] = 5
+    target = player.artists[0] if player.artists else Artist(aid="zz", name="临时")
+    if not player.artists:
+        player.artists.append(target)
+    before_stamina = target.stamina
+    res = E.use_item(store, player, "能量饮料", target.name, count=3)
+    total_gain = min(100, before_stamina + C.REST_STAMINA_GAIN * 3) - before_stamina
+    check(res.ok, "批量使用能量饮料成功", res.text)
+    check(target.stamina >= before_stamina, "体力批量恢复")
+
     # ------------------------------------------------------------ 商业活动
     print("\n=== 9. 商业活动（每日 3 次，刷新即作废）===")
     player.cash = 20000
@@ -495,10 +575,10 @@ async def main() -> None:
     check("离线消息" in text and "待补发内容" in text, "离线消息渲染正常")
     check(player.notice_count() == 0, "渲染后队列清空")
 
-    # 面板不暴露账号编号，并提示未读消息
-    panel = R.render_player_panel(player, store.tier_info(player), notice_count=2)
+    # 面板不暴露账号编号；未读消息已不在面板展示（改为发指令时单独补发）
+    panel = R.render_player_panel(player, store.tier_info(player))
     check(player.uid not in panel.markdown, "玩家面板不含账号编号")
-    check("未读消息" in panel.markdown, "玩家面板提示未读消息")
+    check("未读消息" not in panel.markdown, "玩家面板不再展示未读消息条数")
     check(S.holder_name(store, "10001") == player.name, "持股人显示为昵称")
     check(S.holder_name(store, "nobody") == "某位玩家", "未知持股人使用占位称呼")
 

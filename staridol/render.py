@@ -264,7 +264,6 @@ def render_player_panel(
     show_total: int = SHOW_TOTAL,
     market_total: int = MARKET_TOTAL,
     holding_value: int = 0,
-    notice_count: int = 0,
 ) -> Card:
     """董事长个人面板。"""
     quest_done = sum(1 for q in player.quests if q.done)
@@ -279,8 +278,6 @@ def render_player_panel(
     ]
     if holding_value:
         lines.append(f"**持股市值**：{U.fmt_money(holding_value)}（发送「持股」查看明细）")
-    if notice_count:
-        lines.append(f"**未读消息**：{notice_count} 条（发送「未读消息」查看）")
     lines.extend(
         [
             f"**信用**：{_credit_text(player)}",
@@ -366,7 +363,7 @@ def render_artist_panel(artist: Artist) -> Card:
         f"**粉丝**：{U.fmt_number(artist.fans)}　**人气**：{artist.fame}　**口碑**：{artist.reputation}",
         "**属性**：",
         artist_attr_block(artist),
-        f"**平均**：{artist.avg_attr:.1f}　**估值**：{U.fmt_money(artist.value)}　"
+        f"**平均**：{artist.avg_attr:.1f}　**计入总资产**：{U.fmt_money(artist.value)}（按薪资）　"
         f"**参演**：{artist.total_projects} 次",
     ]
     if artist.status == C.STATUS_PROJECT and artist.project_id:
@@ -429,7 +426,7 @@ def render_show_pool(player: Player, show_total: int = SHOW_TOTAL) -> Card:
     """今日秀场候选列表（每位艺人附带一键签约按钮）。"""
     lines = [
         f"# 今日秀场（剩余 {player.show_left}/{show_total} 次）",
-        "以下艺人正在等待签约，属性越高越值得投资。",
+        "以下均为素人艺人，素人签约金默认 5w，属性越高越值得投资。",
         "",
     ]
     if not player.show_pool:
@@ -437,9 +434,6 @@ def render_show_pool(player: Player, show_total: int = SHOW_TOTAL) -> Card:
     for index, artist in enumerate(player.show_pool, 1):
         lines.append(f"**{index}. {artist.name}**（素人）")
         lines.append(artist_attr_block(artist, compact=True))
-        lines.append(
-            f"　签约金 {U.fmt_money(artist.salary * C.SIGN_FEE_RATE)}　估值 {U.fmt_money(artist.value)}"
-        )
     lines.append("")
     lines.append("发送「聘用艺人名」签约。再次发送「今日秀场」会刷新候选（未签约的会消失）。")
     buttons = [
@@ -555,27 +549,13 @@ def render_project_panel(player: Player) -> Card:
         lines.append("暂无进行中的项目。")
     for project in active:
         lines.append(f"**《{project.name}》**（{project.ptype}）")
-        lines.append(
-            f"　投资 {U.fmt_money(project.invest)}　评分 {U.fmt_score(project.score)}"
-            f"　时长 {project.duration} 小时"
-        )
+        lines.append(f"　投资 {U.fmt_money(project.invest)}　时长 {project.duration} 小时")
         lines.append(f"　{project.progress_line()}")
         if project.artists:
-            # 紧凑展示：艺人名（增加的评分），如 张三（0.6）、李四（0.4）
-            parts = []
-            for aid in project.artists:
-                artist = next((a for a in player.artists if a.aid == aid), None)
-                if artist is not None:
-                    score = U.fmt_score(project.artist_scores.get(aid, 0.0))
-                    parts.append(f"{artist.name}（{score}）")
-                else:
-                    parts.append(aid)
-            lines.append(
-                f"　参与艺人：{'、'.join(parts)}　"
-                f"已发薪资 {U.fmt_money(project.salary_paid)}"
-            )
+            parts = project_artist_names(player, project)
+            lines.append(f"　参与艺人：{'、'.join(parts)}")
         else:
-            lines.append("　尚未投放艺人（发送「艺人名参加项目名」）")
+            lines.append("　尚未投放艺人（发送「【角色名】参加【项目名】」）")
         lines.append("")
     if history:
         lines.append("**最近结算**")

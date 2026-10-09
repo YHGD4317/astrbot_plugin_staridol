@@ -283,29 +283,34 @@ def open_box(store: GameStore, player: Player) -> tuple[str, str]:
     return f"{name}×1", f"盲盒开出了 **{name}**"
 
 
-def use_item(store: GameStore, player: Player, name: str, target: str = "") -> Result:
-    """使用背包中的道具。"""
+def use_item(store: GameStore, player: Player, name: str, target: str = "", count: int = 1) -> Result:
+    """使用背包中的道具（支持批量使用，效果直接叠加）。
+
+    ``count`` 为使用数量，例如「使用2个幸运符」。数量以背包实际持有为上限，
+    同种增益/属性/恢复效果按数量线性叠加。
+    """
     name = (name or "").strip()
     tpl = C.ITEMS.get(name)
     if tpl is None:
         return Result.fail(f"没有「{name}」这件道具。")
-    if player.items.get(name, 0) <= 0:
+    count = max(1, int(count))
+    have = int(player.items.get(name, 0))
+    if have <= 0:
         return Result.fail(f"背包里没有「{name}」了，可发送「打开商城」购买。")
+    count = min(count, have)
 
     ts = U.now()
 
     # ---- 盲盒 ----
     if tpl.kind == "box":
-        player.items[name] -= 1
-        summary, detail = open_box(store, player)
+        player.items[name] -= count
+        lines = [f"# {name}", f"**批量开启**：×{count}", ""]
+        for _ in range(count):
+            summary, detail = open_box(store, player)
+            lines.append(f"- {detail}（获得：{summary}）")
+        lines.append("")
+        lines.append(f"**现金**：{U.fmt_money(player.cash)}")
         store.mark_dirty()
-        lines = [
-            f"# {name}",
-            detail,
-            "",
-            f"**获得**：{summary}",
-            f"**现金**：{U.fmt_money(player.cash)}",
-        ]
         return Result.success(card=R.Card(markdown="\n".join(lines)))
 
     # ---- 属性道具 ----
@@ -314,23 +319,29 @@ def use_item(store: GameStore, player: Player, name: str, target: str = "") -> R
             artist = player.find_artist(target) if target else None
             if artist is None:
                 return Result.fail(f"「{name}」需要指定艺人，例如「使用{name}给（艺人名）」。")
-            gain = artist.add(tpl.attr, tpl.value)
-            player.items[name] -= 1
+            before = artist.get(tpl.attr)
+            for _ in range(count):
+                artist.add(tpl.attr, tpl.value)
+            player.items[name] -= count
             attr_cn = C.ARTIST_ATTR_CN.get(tpl.attr, "属性")
+            acted = artist.get(tpl.attr) - before
             store.mark_dirty()
             return Result.success(
                 text=(
-                    f"{artist.name} 的 **{attr_cn} +{gain}**（当前 {artist.get(tpl.attr)}）\n"
+                    f"{artist.name} 的 **{attr_cn} +{acted}**（使用 {count} 个，当前 {artist.get(tpl.attr)}）\n"
                     f"剩余「{name}」×{player.items.get(name, 0)}"
                 )
             )
-        gain = player.add_attr(tpl.attr, tpl.value)
-        player.items[name] -= 1
+        before = player.attr(tpl.attr)
+        for _ in range(count):
+            player.add_attr(tpl.attr, tpl.value)
+        player.items[name] -= count
         attr_cn = C.PLAYER_ATTR_CN.get(tpl.attr, "属性")
+        acted = player.attr(tpl.attr) - before
         store.mark_dirty()
         return Result.success(
             text=(
-                f"你的 **{attr_cn} +{gain}**（当前 {player.attr(tpl.attr)}）\n"
+                f"你的 **{attr_cn} +{acted}**（使用 {count} 个，当前 {player.attr(tpl.attr)}）\n"
                 f"剩余「{name}」×{player.items.get(name, 0)}"
             )
         )
@@ -343,57 +354,64 @@ def use_item(store: GameStore, player: Player, name: str, target: str = "") -> R
                 return Result.fail(f"「{name}」需要指定艺人，例如「使用{name}给（艺人名）」。")
             artist_sys.regen_stamina(artist, ts)
             before = artist.stamina
-            artist.stamina = min(100, artist.stamina + tpl.value)
-            player.items[name] -= 1
+            artist.stamina = min(100, artist.stamina + tpl.value * count)
+            player.items[name] -= count
             store.mark_dirty()
             return Result.success(
                 text=(
-                    f"{artist.name} 体力 {before} → **{artist.stamina}/100**\n"
+                    f"{artist.name} 体力 {before} → **{artist.stamina}/100**（使用 {count} 个）\n"
                     f"剩余「{name}」×{player.items.get(name, 0)}"
                 )
             )
         if tpl.restore == "show":
-            player.show_left += tpl.value
-            player.items[name] -= 1
+            player.show_left += tpl.value * count
+            player.items[name] -= count
             store.mark_dirty()
             return Result.success(
                 text=(
-                    f"今日秀场次数 +{tpl.value}（当前 {player.show_left} 次）\n"
+                    f"今日秀场次数 +{tpl.value * count}（使用 {count} 个，当前 {player.show_left} 次）\n"
                     f"剩余「{name}」×{player.items.get(name, 0)}"
                 )
             )
         if tpl.restore == "market":
-            player.market_left += tpl.value
-            player.items[name] -= 1
+            player.market_left += tpl.value * count
+            player.items[name] -= count
             store.mark_dirty()
             return Result.success(
                 text=(
-                    f"今日商业活动次数 +{tpl.value}（当前 {player.market_left} 次）\n"
+                    f"今日商业活动次数 +{tpl.value * count}（使用 {count} 个，当前 {player.market_left} 次）\n"
                     f"剩余「{name}」×{player.items.get(name, 0)}"
                 )
             )
         if tpl.restore == "quest":
-            added = quest_sys.add_quests(store, player, tpl.value)
-            player.items[name] -= 1
+            added = quest_sys.add_quests(store, player, tpl.value * count)
+            player.items[name] -= count
             store.mark_dirty()
             return Result.success(
                 text=(
-                    f"已补发 {added} 条今日事务，发送「今日行程」继续处理。\n"
+                    f"已补发 {added} 条今日事务（使用 {count} 个），发送「今日行程」继续处理。\n"
                     f"剩余「{name}」×{player.items.get(name, 0)}"
                 )
             )
         return Result.fail(f"「{name}」暂时无法使用。")
 
-    # ---- 临时增益 ----
+    # ---- 临时增益（效果叠加：同种增益多次使用，数值按次数相乘、时长顺延）----
     if tpl.kind == "temp":
+        consume = count
         expire = ts + max(60, tpl.duration)
-        player.buffs[tpl.buff] = expire
-        player.items[name] -= 1
+        total_count = consume
+        if tpl.buff in player.buffs:
+            old_expire, old_count = player._buff_entry(player.buffs[tpl.buff])
+            if old_expire > ts:
+                expire = max(expire, old_expire)
+                total_count = old_count + consume
+        player.buffs[tpl.buff] = {"expire": expire, "count": total_count}
+        player.items[name] -= consume
         store.mark_dirty()
         return Result.success(
             text=(
-                f"已使用「{name}」：{tpl.desc}\n"
-                f"**有效期至**：{U.fmt_clock(expire)}\n"
+                f"已使用「{name}」×{consume}：{tpl.desc}\n"
+                f"增益效果已叠加（共 {total_count} 次），**有效期至**：{U.fmt_clock(expire)}\n"
                 f"剩余「{name}」×{player.items.get(name, 0)}"
             )
         )

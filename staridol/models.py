@@ -80,10 +80,12 @@ class Artist:
 
     @property
     def value(self) -> int:
-        """市场估值（w），用于集团总资产统计。"""
-        base = C.LEVEL_VALUE.get(self.level, 10)
-        avg = sum(self.get(k) for k in C.ARTIST_ATTRS.values()) / max(1, len(C.ARTIST_ATTRS))
-        return int(base * (0.6 + avg / 100))
+        """该艺人计入集团总资产的价值（w）。
+
+        按等级薪资计：素人 5w、五线 20w …（即艺人等级薪资）。
+        解聘艺人即从员工名册移除，该加成随之从总资产中消失。
+        """
+        return int(C.LEVEL_SALARY.get(self.level, 5))
 
     @property
     def avg_attr(self) -> float:
@@ -209,6 +211,8 @@ class Project:
     external: bool = False
     owner: str = ""
     settled: bool = False
+    investor_funds: dict[str, int] = field(default_factory=dict)  # uid -> 投入资金（w）
+    open_invest: bool = False  # 是否开放给其他玩家追加投资
 
     @property
     def is_running(self) -> bool:
@@ -260,6 +264,8 @@ class Project:
             "external": self.external,
             "owner": self.owner,
             "settled": self.settled,
+            "investor_funds": {str(k): int(v) for k, v in self.investor_funds.items()},
+            "open_invest": self.open_invest,
         }
 
     @classmethod
@@ -287,6 +293,11 @@ class Project:
         project.external = bool(data.get("external"))
         project.owner = str(data.get("owner") or "")
         project.settled = bool(data.get("settled"))
+        project.investor_funds = {str(k): int(v) for k, v in (data.get("investor_funds") or {}).items()}
+        # 兼容旧存档：若无投资者记录，则视 owner 独自持有全部投资
+        if not project.investor_funds:
+            project.investor_funds = {project.owner: int(project.invest) if project.owner else 0}
+        project.open_invest = bool(data.get("open_invest"))
         return project
 
 
@@ -602,9 +613,17 @@ class Player:
     # ---- 资产 ----
     @property
     def total_asset(self) -> int:
-        """集团总资产（w）。"""
+        """集团总资产（w）。
+
+        项目价值只计入本玩家自己投入的资金（若其他玩家对某项目追加了投资，
+        那部分并不计入本项目业主的总资产，而会计入投资方在结算时的份额）。
+        """
         artists_value = sum(a.value for a in self.artists)
-        project_value = sum(p.invest for p in self.projects if not p.settled and p.status != C.PROJECT_CANCELLED)
+        project_value = sum(
+            int(p.investor_funds.get(self.uid, p.invest))
+            for p in self.projects
+            if not p.settled and p.status != C.PROJECT_CANCELLED
+        )
         company_value = sum(c.asset for c in self.companies)
         return int(self.cash + self.deposit + artists_value + project_value + company_value - self.loan)
 
@@ -687,32 +706,54 @@ class Player:
         return names
 
     # ---- 临时增益 ----
+    # buffs 中每个键的取值为 ``{"expire": ts, "count": n}``（n 为使用次数，效果叠加）。
+    # 兼容旧存档：若值为普通时间戳（旧格式），视为 count = 1。
+    def _buff_entry(self, value: Any) -> tuple[float, int]:
+        """把 buff 存储值解析成 (expire, count)。兼容新旧格式。"""
+        if isinstance(value, dict):
+            expire = float(value.get("expire") or 0)
+            count = max(1, int(value.get("count") or 1))
+        else:
+            expire = float(value or 0)
+            count = 1
+        return expire, count
+
     def buff_value(self, buff: str, ts: float | None = None) -> int:
-        """读取未过期的增益数值（已过期返回 0）。"""
+        """读取未过期的增益数值（已过期返回 0）。同种增益多次使用时效果叠加。"""
         ts = ts if ts is not None else U.now()
-        expire = float(self.buffs.get(buff, 0) or 0)
+        if buff not in self.buffs:
+            return 0
+        expire, count = self._buff_entry(self.buffs[buff])
         if expire <= ts:
             return 0
         info = C.BUFFS.get(buff)
-        return int(info["value"]) if info else 0
+        return int(info["value"]) * count if info else 0
 
     def buff_desc(self, ts: float | None = None) -> list[str]:
         """列出当前生效的增益描述。"""
         ts = ts if ts is not None else U.now()
         result = []
-        for key, expire in self.buffs.items():
-            if float(expire or 0) <= ts:
+        for key, raw in self.buffs.items():
+            expire, count = self._buff_entry(raw)
+            if expire <= ts:
                 continue
             info = C.BUFFS.get(key)
             if not info:
                 continue
-            result.append(f"{info['name']}（{info['desc']}，剩余 {U.fmt_duration(float(expire) - ts)}）")
+            value = int(info["value"]) * count
+            extra = f"×{count}" if count > 1 else ""
+            result.append(
+                f"{info['name']}{extra}（{info['desc']}，剩余 {U.fmt_duration(expire - ts)}）"
+            )
         return result
 
     def clear_expired_buffs(self, ts: float | None = None) -> list[str]:
         """清理过期增益，返回被清理的增益名。"""
         ts = ts if ts is not None else U.now()
-        expired = [k for k, v in list(self.buffs.items()) if float(v or 0) <= ts]
+        expired = [
+            k for k, v in list(self.buffs.items())
+            if self._buff_entry(v)[0] <= ts
+        ]
         for key in expired:
             self.buffs.pop(key, None)
         return expired
@@ -739,7 +780,11 @@ class Player:
             "quests": [q.to_dict() for q in self.quests],
             "companies": [c.to_dict() for c in self.companies],
             "items": dict(self.items),
-            "buffs": dict(self.buffs),
+            "buffs": {
+                str(k): {"expire": exp, "count": cnt}
+                for k, v in self.buffs.items()
+                for (exp, cnt) in [self._buff_entry(v)]
+            },
             "last_quest_date": self.last_quest_date,
             "quest_total": self.quest_total,
             "show_date": self.show_date,
@@ -780,7 +825,17 @@ class Player:
         player.quests = [Quest.from_dict(x) for x in (data.get("quests") or [])]
         player.companies = [Company.from_dict(x) for x in (data.get("companies") or [])]
         player.items = _dict_to_int(data.get("items"))
-        player.buffs = {str(k): float(v or 0) for k, v in (data.get("buffs") or {}).items()}
+        player.buffs = {}
+        for k, v in (data.get("buffs") or {}).items():
+            key = str(k)
+            if isinstance(v, dict):
+                player.buffs[key] = {
+                    "expire": float(v.get("expire") or 0),
+                    "count": max(1, int(v.get("count") or 1)),
+                }
+            else:
+                # 兼容旧存档：普通时间戳视为使用 1 次
+                player.buffs[key] = {"expire": float(v or 0), "count": 1}
         player.last_quest_date = str(data.get("last_quest_date") or "")
         player.quest_total = int(data.get("quest_total") or 0)
         player.show_date = str(data.get("show_date") or "")

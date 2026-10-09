@@ -142,6 +142,8 @@ def main() -> None:
         ("今日选秀", "show"),
         ("聘用林星野", "hire"),
         ("解聘林星野", "fire"),
+        ("解雇林星野", "fire"),
+        ("解聘林星野、苏清和、白露", "fire"),
         ("查询林星野", "query_artist"),
         ("员工", "staff"),
         ("林星野去训练舞蹈", "train"),
@@ -169,6 +171,10 @@ def main() -> None:
         ("商业活动", "market"),
         ("投资1号项目", "invest_market"),
         ("投资3号", "invest_market"),
+        ("追加投资《今天吃什么》500", "add_investment"),
+        ("追加投资今天吃什么500", "add_investment"),
+        ("开放投资项目今天吃什么", "toggle_project_invest"),
+        ("关闭投资项目今天吃什么", "toggle_project_invest"),
         ("取消项目今天吃什么", "cancel_project"),
         # 股市
         ("今日股市", "stock"),
@@ -182,8 +188,6 @@ def main() -> None:
         ("开放投资星海影视公司 单价200 放出30", "open_invest"),
         ("关闭投资星海影视公司", "close_invest"),
         # 管理
-        ("未读消息", "notices"),
-        ("查看通知", "notices"),
         ("同步机器人菜单", "sync_menu"),
         ("备份列表", "backup_list"),
         ("立即备份", "backup_now"),
@@ -202,6 +206,8 @@ def main() -> None:
         ("购买神秘盲盒", "buy"),
         ("购买2个神秘盲盒", "buy"),
         ("使用幸运符", "use_item"),
+        ("使用2个幸运符", "use_item"),
+        ("使用3个演技指导给林星野", "use_item"),
         ("使用演技指导给林星野", "use_item"),
         ("使用能量饮料给苏清和", "use_item"),
         ("创建影视公司", "create_company"),
@@ -549,16 +555,16 @@ async def integration() -> None:
         text = (result.card.markdown if result.card else result.text) or ""
         check(result.ok and key in text, f"{cmd} 面板正常", text[:60])
 
-    # 11.5 离线消息随回复补发
+    # 11.5 离线消息补发（sender 为 None 时退化为拼接在主回复前；真实环境单独发卡片）
     player.pending_notices.clear()
     player.push_notice("离线通知：林星野训练完成")
     result = await run("信息")
     text = (result.card.markdown if result.card else result.text) or ""
     check("离线消息" in text and "训练完成" in text, "离线消息随下一次回复补发")
     check(player.notice_count() == 0, "补发后队列清空")
-    result = await run("未读消息")
-    text = (result.card.markdown if result.card else result.text) or ""
-    check("没有未读消息" in text, "无消息时给出提示")
+    # 未读消息指令已删除，闲聊消息不再被路由
+    result = await router.handle(FakeEvent("未读消息"))
+    check(result is None, "「未读消息」指令已删除，不再路由到游戏逻辑")
 
     # 12. 非指令消息放行
     result = await router.handle(FakeEvent("今天天气不错，适合出去走走"))

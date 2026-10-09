@@ -121,11 +121,12 @@ def do_check(store: GameStore, player: Player, attr_cn: str) -> Result:
     delta = 0
 
     if result.crit_success:
-        reward = int(base_reward * 2 * random.uniform(1.0, 1.2))
+        # 大成功：收益 x3，并额外获得 1 点属性
+        reward = int(base_reward * 3 * random.uniform(1.0, 1.2))
         player.earn(reward)
         delta = reward
         gain = player.add_attr(attr_key, C.CHECK_CRIT_ATTR_GAIN)
-        reward_text = f"**大成功**！事务处理得滴水不漏，获得 {U.fmt_money(reward)}。"
+        reward_text = f"**大成功**！事务处理得滴水不漏，获得 {U.fmt_money(reward)}（收益 x3）。"
         if gain:
             extra.append(f"**{attr_cn} +{gain}**（当前 {player.attr(attr_key)}）")
     elif result.success:
@@ -138,8 +139,11 @@ def do_check(store: GameStore, player: Player, attr_cn: str) -> Result:
         loss = min(loss, max(0, player.money))
         real_loss = player.force_pay(loss)
         delta = -real_loss
+        gain = player.add_attr(attr_key, C.CHECK_CRIT_ATTR_GAIN)
         reward_text = f"**大失败**！判断失误造成损失 {U.fmt_money(real_loss)}。"
         extra.append("这一单不仅没赚到钱，还赔进去了。")
+        if gain:
+            extra.append(f"但挫折也让你成长了：**{attr_cn} +{gain}**（当前 {player.attr(attr_key)}）")
     else:
         reward = int(base_reward * C.QUEST_MISS_REWARD_RATE)
         player.earn(reward)

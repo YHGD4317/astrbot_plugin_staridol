@@ -283,29 +283,54 @@ def hire(store: GameStore, player: Player, name: str) -> Result:
         "# 签约成功",
         f"**{artist.name}** 已加入 {player.company_name or '集团'}。",
         "",
-        f"**签约金**：{U.fmt_money(fee)}（{artist.level} 工资 {U.fmt_money(artist.salary)}）",
         "**属性**：",
         R.artist_attr_block(artist),
-        f"**估值**：{U.fmt_money(artist.value)}",
         "",
-        f"可发送「{artist.name}去训练舞蹈」开始培养，或「查询{artist.name}」查看面板。",
+        "可发送「【角色名去训练xx】」开始培养（把『角色名』替换为姓名、『xx』替换为属性），"
+        "或者发送「查询【角色名】」查看面板。",
     ]
     return Result.success(card=R.Card(markdown="\n".join(lines)))
 
 
-def fire(store: GameStore, player: Player, name: str) -> Result:
-    """解聘艺人。"""
-    artist = player.find_artist(name)
-    if artist is None:
-        return Result.fail(f"名册中没有找到「{name}」。")
-    if artist.is_busy():
-        return Result.fail(f"{artist.name} 正在{artist.status_text or '忙碌'}，无法解聘。")
-    player.artists = [a for a in player.artists if a.aid != artist.aid]
-    store.record_names({artist.name})
+def fire(store: GameStore, player: Player, names: list[str]) -> Result:
+    """解聘艺人（支持一次性批量解聘，例如「解聘张三、李四、王五」）。
+
+    忙碌（训练 / 休息 / 参加项目）中的艺人无法解聘，会被跳过。
+    解聘即从员工名册移除，其按等级薪资计入的总资产加成随之消失。
+    """
+    if not names:
+        return Result.fail("请指定要解聘的艺人，例如「解聘张三、李四」。")
+    missing: list[str] = []
+    busy: list[str] = []
+    fired: list[str] = []
+    for name in names:
+        artist = player.find_artist(name)
+        if artist is None:
+            missing.append(name)
+            continue
+        if artist.is_busy():
+            busy.append(f"{artist.name}（{artist.status_text or '忙碌'}）")
+            continue
+        player.artists = [a for a in player.artists if a.aid != artist.aid]
+        store.record_names({artist.name})
+        fired.append(artist.name)
+    if not fired:
+        parts = []
+        if missing:
+            parts.append("名册中没有找到：" + "、".join(missing))
+        if busy:
+            parts.append("正在忙碌无法解聘：" + "、".join(busy))
+        return Result.fail("、".join(parts) or "未解除任何合约。")
     store.mark_dirty()
-    return Result.success(
-        text=f"已解除与 {artist.name} 的合约，{artist.name} 离开了 {player.company_name}。"
-    )
+    lines = [
+        "# 解约完成",
+        f"已解除与 **{'、'.join(fired)}** 的合约，他们离开了 {player.company_name}。",
+    ]
+    if busy:
+        lines.append(f"忙中的艺人未解聘：{'、'.join(busy)}")
+    if missing:
+        lines.append(f"未找到：{'、'.join(missing)}")
+    return Result.success(card=R.Card(markdown="\n".join(lines)))
 
 
 def promote(store: GameStore, player: Player, artist: Artist) -> str:

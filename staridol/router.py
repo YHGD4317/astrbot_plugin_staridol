@@ -137,14 +137,13 @@ class Router:
             (re.compile(r"^(?:信息|个人面板|系统面板|我的面板|我的信息|资产)$"), "player_panel"),
             (re.compile(r"^(?:集团面板|集团状态|集团信息)$"), "group_panel"),
             (re.compile(r"^(?:重开|重新开始|重置自己)$"), "reset_self"),
-            (re.compile(r"^(?:未读消息|查看通知|消息记录|离线消息)$"), "notices"),
             (re.compile(r"^(?:同步机器人菜单|同步菜单|同步指令面板)$"), "sync_menu"),
             # ---- 艺人 ----
             (re.compile(r"^(?:今日秀场|今日选秀|秀场|选秀)$"), "show"),
             (re.compile(r"^(?:员工|员工列表|艺人列表|我的艺人)$"), "staff"),
             (re.compile(rf"^(?:查询|查)\s*(?P<name>{NAME})$"), "query_artist"),
             (re.compile(rf"^聘用\s*(?P<name>{NAME})$"), "hire"),
-            (re.compile(rf"^(?:解聘|开除|解约)\s*(?P<name>{NAME})$"), "fire"),
+            (re.compile(rf"^(?:解聘|解雇|开除|解约)\s*(?P<names>.{{1,50}})$"), "fire"),
             (re.compile(rf"^晋升\s*(?P<name>{NAME})$"), "promote"),
             (
                 re.compile(rf"^(?P<name>{NAME}?)去(?:训练|练习|学习)(?P<attr>{ARTIST_ATTR_PATTERN})$"),
@@ -189,6 +188,8 @@ class Router:
                 "join_project",
             ),
             (re.compile(r"^投资\s*(?P<index>\d+)\s*号?(?:项目)?$"), "invest_market"),
+            (re.compile(r"^追加投资\s*(?P<rest>[^0-9]+)(?P<amount>\d+(?:\.\d+)?)\s*[wW万]?$"), "add_investment"),
+            (re.compile(rf"^(?P<action>开放|关闭)投资项目\s*(?P<name>[^\s《》]{{1,14}})$"), "toggle_project_invest"),
             (re.compile(rf"^取消项目\s*(?P<name>{NAME})$"), "cancel_project"),
             # ---- 股市 ----
             (re.compile(r"^(?:持股|我的持股|持仓|股份)$"), "holdings"),
@@ -219,7 +220,10 @@ class Router:
             (re.compile(r"^(?:打开商城|商城|商店)$"), "shop"),
             (re.compile(r"^购买\s*(?P<count>\d+)?\s*个?\s*(?P<name>.+)$"), "buy"),
             (
-                re.compile(rf"^使用\s*(?P<name>{ITEM_PATTERN})(?:\s*(?:给|对)\s*(?P<target>{NAME}))?$"),
+                re.compile(
+                    rf"^使用\s*(?P<count>\d+)?\s*个?\s*(?P<name>{ITEM_PATTERN})"
+                    rf"(?:\s*(?:给|对)\s*(?P<target>{NAME}))?$"
+                ),
                 "use_item",
             ),
             (re.compile(rf"^创建\s*(?P<type>{COMPANY_PATTERN})$"), "create_company"),
@@ -268,21 +272,31 @@ class Router:
                 self.logger.error(f"[staridol] 处理指令「{text}」失败：{exc}", exc_info=True)
                 return Result.fail("指令处理时出现了一点问题，已经记录到日志了，请稍后重试或联系管理员。")
             if result is not None and not result.silent:
-                # 跨天提示与离线消息（主动推送失败后暂存的结果）随本次回复一并送达
-                prefix_parts: list[str] = []
+                # 跨天提示随主回复一并送达
                 new_day = daily_sys.new_day_notice(info, player)
                 if new_day:
-                    prefix_parts.append(new_day)
-                notices = player.take_notices()
-                if notices:
-                    prefix_parts.append(R.format_notices(notices))
-                if prefix_parts:
-                    prefix = "\n\n---\n\n".join(prefix_parts) + "\n\n---\n\n"
                     if result.card is not None:
-                        result.card.markdown = prefix + result.card.markdown
+                        result.card.markdown = new_day + "\n\n---\n\n" + result.card.markdown
                         result.card.plain = ""
                     else:
-                        result.text = prefix + result.text
+                        result.text = new_day + "\n\n---\n\n" + result.text
+                # 离线消息（主动推送失败后暂存的结果）单独以 md 卡片发送
+                notices = player.take_notices()
+                if notices:
+                    offline_card = R.render_notices(notices)
+                    if self.sender is not None:
+                        try:
+                            await self.sender.send(event, offline_card)
+                        except Exception as exc:
+                            self.logger.error(f"[staridol] 补发离线消息失败：{exc}")
+                    else:
+                        # 测试环境没有发送器：退化为拼接在主回复之前
+                        prefix = R.format_notices(notices) + "\n\n---\n\n"
+                        if result.card is not None:
+                            result.card.markdown = prefix + result.card.markdown
+                            result.card.plain = ""
+                        else:
+                            result.text = prefix + result.text
             self.store.mark_dirty()
             await self.store.save()
             return result
@@ -466,7 +480,6 @@ class Router:
                 self.store.show_total(player),
                 self.store.market_total(player),
                 holding_value,
-                player.notice_count(),
             )
         )
 
@@ -481,13 +494,6 @@ class Router:
         return Result.success(
             text="你的存档已重置，发送「登记（集团名），决策50财商50口才50」重新开始。"
         )
-
-    async def _cmd_notices(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
-        """查看未读消息（主动推送失败时暂存的内容）。"""
-        notices = player.take_notices(limit=C.MAX_PENDING_NOTICES)
-        if not notices:
-            return Result.success(text="当前没有未读消息。")
-        return Result.success(card=R.render_notices(notices))
 
     async def _cmd_sync_menu(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         if not self._check_admin(event):
@@ -526,7 +532,7 @@ class Router:
         return artist_sys.hire(self.store, player, match.group("name"))
 
     async def _cmd_fire(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
-        return artist_sys.fire(self.store, player, match.group("name"))
+        return artist_sys.fire(self.store, player, split_names(match.group("names")))
 
     async def _cmd_promote(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         artist = player.find_artist(match.group("name"))
@@ -632,6 +638,22 @@ class Router:
     async def _cmd_cancel_project(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         return project_sys.cancel_project(self.store, player, match.group("name"))
 
+    async def _cmd_add_investment(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.points_assigned:
+            return self._need_register(player)
+        name = (match.group("rest") or "").strip().strip("《》<>「」（）()，, ")
+        amount = parse_amount(match.group("amount"))
+        return project_sys.add_investment(self.store, player, name, amount)
+
+    async def _cmd_toggle_project_invest(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.points_assigned:
+            return self._need_register(player)
+        action = match.group("action")
+        name = match.group("name").strip().strip("《》")
+        if action == "开放":
+            return project_sys.open_project_investment(self.store, player, name)
+        return project_sys.close_project_investment(self.store, player, name)
+
     # ------------------------------------------------------------------
     # 股市
     # ------------------------------------------------------------------
@@ -713,6 +735,7 @@ class Router:
             player,
             (match.group("name") or "").strip(),
             (match.groupdict().get("target") or "").strip(),
+            parse_count(match.group("count")),
         )
 
     async def _cmd_create_company(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:

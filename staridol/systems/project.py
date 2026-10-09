@@ -73,6 +73,19 @@ def score_breakdown(player: Player, ptype: str, invest: int, project: Project | 
     )
 
 
+def _recompute_score(project: Project) -> None:
+    """按当前总投资额与艺人加成重算项目评分。
+
+    评分 = base_score（玩家主属性基础分）+ 制作加成（由总投资额决定）
+           + Σ(参与艺人加分)。投资额变化（追加投资 / 他人加入投资）会自动抬升评分。
+    """
+    production = calc_production_bonus(project.invest)
+    artist_total = sum(project.artist_scores.values())
+    project.score = U.round_score(
+        max(C.MIN_SCORE, project.base_score + production + artist_total)
+    )
+
+
 # --------------------------------------------------------------------------
 # 项目命名（重名自动追加序号，形成系列项目）
 # --------------------------------------------------------------------------
@@ -218,11 +231,14 @@ def plan_project(
         name=final_name,
         ptype=ptype,
         invest=invest,
-        base_score=total,
+        base_score=base_score,
         score=total,
         duration=duration,
         owner=player.uid,
     )
+    # 业主的初始投资计入其份额；评分统一由 base_score + 制作加成 + 艺人加成重算
+    project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + invest
+    _recompute_score(project)
     player.projects.append(project)
     player.push_log(f"立项《{final_name}》（{ptype}，投资 {U.fmt_money(invest)}）")
     store.mark_dirty()
@@ -338,10 +354,7 @@ def join_project(store: GameStore, player: Player, names: list[str], project_nam
     lines.append(f"**加入艺人**：{'、'.join(a.name for a, _, _ in added)}")
     lines.append(f"**发放薪资**：共 {U.fmt_money(total_salary)}（{salary_text}）")
     for artist, _, _gain in added:
-        lines.append(
-            f"- {artist.name}：{R.artist_score_calc(artist, project.ptype)}"
-            f"　体力 {artist.stamina}/100（每小时消耗 {C.PROJECT_STAMINA_PER_HOUR} 点）"
-        )
+        lines.append(f"- {artist.name}：评分加成 {R.artist_score_calc(artist, project.ptype)}")
     lines.append("")
     lines.append(
         f"**当前评分**：{U.fmt_score(project.score)}"
@@ -374,15 +387,40 @@ def settle_project(store: GameStore, player: Player, project: Project, ts: float
 
     revenue = calc_revenue(project.invest, project.score)
     project.revenue = revenue
-    player.earn(revenue)
+    # 收益按各方投入资金的比例分配
+    total_invest = max(1, project.invest)
+    distribution: dict[str, int] = {}
+    for uid, funds in project.investor_funds.items():
+        funds = int(funds or 0)
+        distribution[str(uid)] = int(revenue * funds // total_invest) if funds else 0
+    owner_share = distribution.get(player.uid, 0)
+    if owner_share:
+        player.earn(owner_share)
+    for uid, share in distribution.items():
+        if uid == player.uid or not share:
+            continue
+        other = store.get(uid)
+        if other is not None:
+            other.earn(share)
 
     lines = [
         f"# 《{project.name}》已结束",
         f"**类型**：{project.ptype}　**时长**：{project.duration} 小时",
         f"**最终评分**：{U.fmt_score(project.score)}",
-        f"**投资**：{U.fmt_money(project.invest)}　**回收**：{U.fmt_money(revenue)}　"
+        f"**总投资**：{U.fmt_money(project.invest)}　**回收**：{U.fmt_money(revenue)}　　　"
         f"**净收益**：{U.fmt_signed(revenue - project.invest)}",
     ]
+    if len(distribution) > 1 or len(project.investor_funds) > 1:
+        parts = []
+        for uid, share in distribution.items():
+            funds = int(project.investor_funds.get(uid, 0))
+            if uid == player.uid:
+                who = player.name
+            else:
+                other = store.get(uid)
+                who = other.name if other is not None else "某位玩家"
+            parts.append(f"{who}（投入 {U.fmt_money(funds)}）分得 {U.fmt_money(share)}")
+        lines.append("**收益分配**：" + "；".join(parts))
     if project.salary_paid:
         lines.append(f"**艺人薪资支出**：{U.fmt_money(project.salary_paid)}")
     if project.score < C.SCORE_LOSS_ALL:
@@ -472,6 +510,7 @@ def invest_market(store: GameStore, player: Player, index: int) -> Result:
         external=True,
         owner=player.uid,
     )
+    project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + project.invest
     player.projects.append(project)
     player.push_log(f"投资外部项目《{final_name}》{U.fmt_money(item.invest)}")
     store.mark_dirty()
@@ -486,3 +525,134 @@ def invest_market(store: GameStore, player: Player, index: int) -> Result:
         lines.insert(2, f"检测到已有同名项目，本次自动命名为《{final_name}》。")
     lines.extend(["", "到期后会自动结算并通知你。"])
     return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+
+# --------------------------------------------------------------------------
+# 追加投资 / 开放项目投资
+# --------------------------------------------------------------------------
+def find_any_project(store: GameStore, name: str) -> tuple[Player, Project] | None:
+    """在所有玩家的项目中按名称查找项目（用于其他玩家追加投资开放项目）。"""
+    name = (name or "").strip().strip("《》")
+    if not name:
+        return None
+    for owner in store.all_players():
+        project = owner.find_project(name)
+        if project is not None and project.status != C.PROJECT_DONE:
+            return owner, project
+    return None
+
+
+def _production_delta(old_invest: int, new_invest: int) -> float:
+    """计算追加投资带来的制作加成增长（评分增量）。"""
+    return calc_production_bonus(new_invest) - calc_production_bonus(old_invest)
+
+
+def find_project_for_invest(store: GameStore, player: Player, name: str) -> tuple[Player, Project | None, bool]:
+    """定位用于追加投资的项目。
+
+    ``is_owner`` 表示该玩家是否为项目业主；业主可以对任何未结束的项目追加，
+    其他玩家只能追加自己已开放投资的项目。
+    返回 (业主, 项目, 是否业主)；找不到项目时返回 (None, None, False)。
+    """
+    own = player.find_project(name)
+    if own is not None and own.status != C.PROJECT_DONE:
+        return player, own, True
+    found = find_any_project(store, name)
+    if found is not None:
+        return found[0], found[1], False
+    return None, None, False
+
+
+def add_investment(store: GameStore, player: Player, project_name: str, amount: int) -> Result:
+    """追加项目投资，提高投资额与项目评分。
+
+    * 业主可直接追加自己名下未结束的项目；
+    * 其他玩家仅当项目已开放投资时才能追加，追加同样提高评分；
+    * 收益在项目结算时按各方投入的资金比例分配。
+    """
+    project_name = (project_name or "").strip().strip("《》")
+    if not project_name:
+        return Result.fail("请指定项目名，例如「追加投资《长夜列车》500」。")
+    amount = int(amount)
+    if amount < C.MIN_INVEST:
+        return Result.fail(
+            f"追加投资金额过低，最少 {U.fmt_money(C.MIN_INVEST)}，例如「追加投资《项目名》500」。"
+        )
+    if not player.can_afford(amount):
+        return Result.fail(
+            f"资金不足：追加需要 {U.fmt_money(amount)}，你当前有 {U.fmt_money(player.money)}。"
+        )
+
+    owner, project, is_owner = find_project_for_invest(store, player, project_name)
+    if project is None:
+        return Result.fail(f"没有找到可追加投资的项目《{project_name}》。")
+    if not is_owner and not project.open_invest:
+        return Result.fail(
+            f"《{project.name}》尚未开放投资，只有业主可以追加；或等业主开放后再投资。"
+        )
+    if project.status != C.PROJECT_PENDING and project.status != C.PROJECT_RUNNING:
+        return Result.fail(f"《{project.name}》状态为 {project.status}，无法追加投资。")
+
+    old_invest = project.invest
+    new_invest = old_invest + amount
+    player.pay(amount)
+    project.invest = new_invest
+    project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + amount
+    score_add = _production_delta(old_invest, new_invest)
+    project.score = U.round_score(max(C.MIN_SCORE, project.score + score_add))
+    store.mark_dirty()
+    if is_owner:
+        owner.push_log(f"为《{project.name}》追加投资 {U.fmt_money(amount)}")
+    else:
+        owner.push_log(f"{player.name} 为《{project.name}》追加投资 {U.fmt_money(amount)}")
+
+    share = int(project.investor_funds.get(player.uid, 0))
+    total = project.invest
+    percent = share / total * 100 if total else 0
+    lines = [
+        "# 追加投资成功",
+        f"**项目**：《{project.name}》（{project.ptype}）",
+        f"**追加**：{U.fmt_money(amount)}　**总投资**：{U.fmt_money(project.invest)}",
+        f"**评分**：{U.fmt_score(project.score)}（制作加成 +{U.fmt_score(score_add)}）",
+        f"**你的投入**：{U.fmt_money(share)}（占总资金 {percent:.1f}%）",
+        "",
+        "项目结算收益将按投入资金比例分配。",
+    ]
+    if project.status == C.PROJECT_PENDING:
+        lines.append(f"发送「{project.name}项目开始」可启动项目。")
+    return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+
+def open_project_investment(store: GameStore, player: Player, name: str) -> Result:
+    """开放名下项目，让其他玩家可以追加投资（仅业主可操作）。"""
+    project = player.find_project(name)
+    if project is None:
+        return Result.fail(f"名册中没有名为《{name}》的项目，可发送「项目面板」查看。")
+    if project.status == C.PROJECT_DONE:
+        return Result.fail(f"《{project.name}》已结束，无法开放投资。")
+    project.open_invest = True
+    store.mark_dirty()
+    return Result.success(
+        card=R.Card(
+            markdown=(
+                f"# 已开放投资\n"
+                f"**《{project.name}》** 已开放投资，其他玩家可发送"
+                f"「追加投资《{project.name}》（金额）」参与，投资同样提升评分，"
+                f"结算时收益按各方投入资金比例分配。"
+            )
+        )
+    )
+
+
+def close_project_investment(store: GameStore, player: Player, name: str) -> Result:
+    """关闭名下项目的投资通道（仅业主可操作）。"""
+    project = player.find_project(name)
+    if project is None:
+        return Result.fail(f"名册中没有名为《{name}》的项目。")
+    if not project.open_invest:
+        return Result.fail(f"《{project.name}》当前并未开放投资。")
+    project.open_invest = False
+    store.mark_dirty()
+    return Result.success(
+        text=f"已关闭《{project.name}》的投资通道，其他玩家不能再追加投资。"
+    )

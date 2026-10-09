@@ -22,7 +22,7 @@
     "type": "string",
     "default": "always_queue",
     "options": ["always_queue", "push_first", "push_only"],
-    "hint": "always_queue（默认）：完全不主动推送，结果统一进入离线队列，玩家发送任意游戏指令时随回复提醒未读变动（推荐，QQ 官方机器人通常没有主动消息权限）；push_first：先尝试主动推送，被拒绝时转入离线队列；push_only：只主动推送，失败即丢弃。玩家可随时发送「未读消息」取回队列内容。"
+    "hint": "always_queue（默认）：完全不主动推送，结果统一进入离线队列，玩家发送任意游戏指令时先单独补发一张「离线消息」卡片、随后再发送其指令回复（推荐，QQ 官方机器人通常没有主动消息权限）；push_first：先尝试主动推送，被拒绝时转入离线队列；push_only：只主动推送，失败即丢弃。已移除「未读消息」指令。"
   },
   "daily_quest_base": {
     "description": "每日事务基础数量",
