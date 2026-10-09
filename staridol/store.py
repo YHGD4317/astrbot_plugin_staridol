@@ -333,6 +333,9 @@ class GameStore:
             # 档位提升时同步给今日秀场 / 商业活动各 +1
             player.show_left += delta
             player.market_left += delta
+            # 档位提升也同步提升每日事务数量：立即补发差额事务，无需等待次日刷新
+            from .systems import quest as quest_sys
+            quest_sys.add_quests(self, player, delta)
             self.mark_dirty()
         return C.TierInfo(
             tier=player.asset_tier,

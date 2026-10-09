@@ -3,7 +3,7 @@
 评分规则（与策划案一致，不设上限）：
 
 * **初始评分** = ``(玩家主属性 + 财商) / 200``，保留一位小数。
-* **制作加成** = ``min(0.5, 投资额 / 10000)``。
+* **制作加成** = ``投资额 / 10000``，不设上限。
 * **艺人加分** = ``项目判定四项属性之和 / 4 / 100``，保留一位小数，单人上限由属性决定。
 * **收益**：评分 < 3 亏损全部投资；3 ≤ 评分 < 5 返还一半；评分 ≥ 5 时
   ``收益 = 投资 × (1 + (评分 - 5) × 10%)``。
@@ -36,8 +36,8 @@ def calc_base_score(player: Player, ptype: str) -> float:
 
 
 def calc_production_bonus(invest: int) -> float:
-    """制作规格加成：投资越大，制作水准越高（最多 +0.5 分）。"""
-    bonus = max(0.0, min(C.PRODUCTION_BONUS_CAP, invest / C.PRODUCTION_BONUS_SCALE))
+    """制作规格加成：投资越大，制作水准越高（不设上限）。"""
+    bonus = max(0.0, invest / C.PRODUCTION_BONUS_SCALE)
     return U.round_score(bonus)
 
 

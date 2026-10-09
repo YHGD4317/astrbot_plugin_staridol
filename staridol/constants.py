@@ -356,9 +356,8 @@ PROJECT_TYPES: dict[str, ProjectType] = {
 #: 自筹划项目的最小投资额
 MIN_INVEST = 50
 
-#: 制作规格加成：投资额每 PRODUCTION_BONUS_SCALE（w）提供 1.0 点评分，上限 PRODUCTION_BONUS_CAP
+#: 制作规格加成：投资额每 PRODUCTION_BONUS_SCALE（w）提供 1.0 点评分，不设上限
 PRODUCTION_BONUS_SCALE = 10000
-PRODUCTION_BONUS_CAP = 0.5
 
 #: 单个项目可投放的艺人上限
 MAX_ARTISTS_PER_PROJECT = 6
@@ -587,10 +586,10 @@ BOX_LOOT_TABLE: list[tuple[str, int]] = [
     ("舞蹈课程", 3),
 ]
 
-#: 盲盒开出金钱的概率与范围（w）。数值调低道具开出的概率，金钱范围 1w~300w
-#: （即 30% 概率开出道具、70% 概率开出不定额金钱）
+#: 盲盒开出金钱的概率与范围（w）。数值调低道具开出的概率，金钱范围 -100w~300w
+#: （即 30% 概率开出道具、70% 概率开出不定额金钱；负数为开盒损耗，最多扣到 0）
 BOX_MONEY_CHANCE = 0.70
-BOX_MONEY_RANGE = (1, 300)
+BOX_MONEY_RANGE = (-100, 300)
 
 #: 商城每日价格浮动范围
 SHOP_PRICE_FLUCTUATION = 0.25

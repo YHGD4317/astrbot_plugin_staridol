@@ -219,9 +219,17 @@ def shop_price(player: Player, name: str) -> int:
 
 
 def roll_discount(player: Player) -> tuple[int, U.CheckResult]:
-    """购买前的口才检定：通过则按二次检定决定折扣（1~9 折）。"""
+    """购买前的口才检定，决定折扣。
+
+    * **大成功**：必定 1 折购买；
+    * **大失败**：按原价购买，并额外收取购买额 20% 的配送/服务/赞助费（由外层处理）；
+    * **普通成功**：通过二次检定决定 1~9 折；
+    * **普通失败**：按原价购买。
+    """
     check = U.roll_check("口才", player.eloquence, player.buff_value("check"))
-    if not check.success:
+    if check.crit_success:
+        return 1, check
+    if check.crit_fail or not check.success:
         return 10, check
     second = random.randint(1, 100)
     for cap, discount in C.DISCOUNT_TIERS:
@@ -236,18 +244,26 @@ def buy_item(store: GameStore, player: Player, name: str, count: int = 1) -> Res
     tpl = C.ITEMS.get(name)
     if tpl is None:
         return Result.fail(f"商城里没有「{name}」这件道具，可发送「打开商城」查看。")
-    count = max(1, min(99, int(count)))
+    count = max(1, int(count))  # 购买数量不设上限
     refresh_shop(store, player)
     if name not in player.shop_stock:
         return Result.fail(f"今日商城没有上架「{name}」，明天再来看看。")
 
     unit = shop_price(player, name)
     discount, check = roll_discount(player)
-    total = max(1, unit * count * discount // 10)
+    fee = 0
+    if check.crit_fail:
+        # 大失败：按原价成交，并额外收取 20% 配送/服务/赞助费
+        base = unit * count
+        fee = int(round(base * 0.2))
+        total = base + fee
+    else:
+        total = max(1, unit * count * discount // 10)
     if not player.can_afford(total):
         return Result.fail(
-            f"资金不足：{name}×{count} 需要 {U.fmt_money(total)}"
-            f"（原价 {U.fmt_money(unit * count)}，{discount} 折），"
+            f"资金不足：{name}×{count} 共需 {U.fmt_money(total)}"
+            f"（原价 {U.fmt_money(unit * count)}，{discount} 折"
+            f"{f'，另收 {U.fmt_money(fee)} 服务费' if fee else ''}），"
             f"你当前有 {U.fmt_money(player.money)}。"
         )
     player.pay(total)
@@ -259,7 +275,16 @@ def buy_item(store: GameStore, player: Player, name: str, count: int = 1) -> Res
         f"**{name}** × {count}",
         f"**原价**：{U.fmt_money(unit * count)}　**成交价**：{U.fmt_money(total)}",
     ]
-    if discount < 10:
+    if check.crit_success:
+        lines.append(
+            f"口才检定**大成功**（骰点 {check.roll}/{check.upper}）！必定以 **1 折** 拿下。"
+        )
+    elif check.crit_fail:
+        lines.append(
+            f"口才检定**大失败**（骰点 {check.roll}/{check.upper}）：按原价成交，"
+            f"另收 **{U.fmt_money(fee)}** 配送/服务/赞助费。"
+        )
+    elif discount < 10:
         lines.append(
             f"口才检定通过（骰点 {check.roll}/{check.upper}），二次检定获得 **{discount} 折** 优惠。"
         )
@@ -270,17 +295,25 @@ def buy_item(store: GameStore, player: Player, name: str, count: int = 1) -> Res
     return Result.success(card=R.Card(markdown="\n".join(lines)))
 
 
-def open_box(store: GameStore, player: Player) -> tuple[str, str]:
-    """开盲盒，返回 (摘要, 详细说明)。"""
+def open_box(store: GameStore, player: Player) -> tuple[str, int | str]:
+    """开盲盒，返回 (种类, 值)。
+
+    * ``kind == "money"``：值 = 开出的金额（w），正数计入、负数从资金中扣减；
+    * ``kind == "item"``：值 = 开出的道具名（已计入背包）。
+    """
     if random.random() < C.BOX_MONEY_CHANCE:
         money = random.randint(*C.BOX_MONEY_RANGE)
-        player.earn(money)
+        if money >= 0:
+            player.earn(money)
+        else:
+            # 开盒损耗：从资金中扣除（最多扣到 0，不产生负资产）
+            player.force_pay(-money)
         store.mark_dirty()
-        return f"现金 {U.fmt_money(money)}", f"盲盒里是一叠现金：{U.fmt_money(money)}"
+        return "money", money
     name = U.weighted_choice(C.BOX_LOOT_TABLE)
     player.items[name] = player.items.get(name, 0) + 1
     store.mark_dirty()
-    return f"{name}×1", f"盲盒开出了 **{name}**"
+    return "item", name
 
 
 def use_item(store: GameStore, player: Player, name: str, target: str = "", count: int = 1) -> Result:
@@ -304,10 +337,28 @@ def use_item(store: GameStore, player: Player, name: str, target: str = "", coun
     # ---- 盲盒 ----
     if tpl.kind == "box":
         player.items[name] -= count
-        lines = [f"# {name}", f"**批量开启**：×{count}", ""]
+        # 聚合统计，直接展示一次性开盒的各类获得总数
+        stats: dict[str, int] = {}  # 道具名 -> 数量
+        money_gain = 0  # 累计现金收益
+        money_loss = 0  # 累计开盒损耗
         for _ in range(count):
-            summary, detail = open_box(store, player)
-            lines.append(f"- {detail}（获得：{summary}）")
+            kind, value = open_box(store, player)
+            if kind == "money":
+                if int(value) >= 0:
+                    money_gain += int(value)
+                else:
+                    money_loss += -int(value)
+            else:
+                stats[str(value)] = stats.get(str(value), 0) + 1
+        lines = [f"# {name}", f"**批量开启**：×{count}", ""]
+        if money_gain:
+            lines.append(f"- **现金收益**：+{U.fmt_money(money_gain)}")
+        if money_loss:
+            lines.append(f"- **开盒损耗**：-{U.fmt_money(money_loss)}")
+        for item_name, qty in stats.items():
+            lines.append(f"- **{item_name}** ×{qty}")
+        if not money_gain and not money_loss and not stats:
+            lines.append("- 一无所获……")
         lines.append("")
         lines.append(f"**现金**：{U.fmt_money(player.cash)}")
         store.mark_dirty()
