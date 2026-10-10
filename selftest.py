@@ -505,7 +505,7 @@ async def main() -> None:
     # 尚未注资时查询给出引导
     panel = CB.panel(store, player)
     check(not panel.ok or "投资赌场" in (panel.card.markdown if panel.card else ""), "未注资时面板给出引导")
-    check(CB.casino_name(player) == "测试总裁赌场", "赌场名称 = 玩家昵称 + 赌场", CB.casino_name(player))
+    check(CB.casino_name(player) == "星海集团赌场", "赌场以集团冠名 = 集团名 + 赌场", CB.casino_name(player))
     # 投资赌场
     before = player.cash
     res = CB.invest(store, player, 5000)

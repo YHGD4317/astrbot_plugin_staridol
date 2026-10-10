@@ -580,6 +580,31 @@ async def integration() -> None:
     result = await router.handle(FakeEvent("未读消息"))
     check(result is None, "「未读消息」指令已删除，不再路由到游戏逻辑")
 
+    # 12.5 投资赌场（NPC 经营）全链路 + 与下属公司分红合并领取
+    from astrbot_plugin_staridol.staridol import utils as U
+    from astrbot_plugin_staridol.staridol.systems import casino_biz as CB
+
+    player.casino_biz = None
+    result = await run("查询赌场")
+    check(result is not None and result.ok, "查询赌场可打开面板", result.text)
+    result = await run("投资赌场5000")
+    check(result.ok, "投资赌场指令生效", result.text)
+    cs_biz = player.casino_biz
+    check(cs_biz is not None and cs_biz.invest == 5000, "赌场注资成功", str(cs_biz and cs_biz.invest))
+    check("星海集团赌场" in CB.casino_name(player), "赌场以集团冠名", CB.casino_name(player))
+    cs_biz.last_visit_at = 0
+    CB.npc_tick(store, player, U.now())
+    claim = cs_biz.claimable
+    cash_before_dividend = player.cash
+    result = await run("收取分红")
+    text = (result.card.markdown if result.card else result.text) or ""
+    if claim > 0:
+        check(result.ok and "分红" in text, "收取分红合并赌场净利", text[:80])
+        check(player.cash >= cash_before_dividend, "分红已到账")
+    else:
+        check(result is not None, "收取分红正常执行（无利润时给出提示）")
+    player.casino_biz = None  # 清理避免影响后续断言
+
     # 12. 非指令消息放行
     result = await router.handle(FakeEvent("今天天气不错，适合出去走走"))
     check(result is None, "闲聊消息不拦截")

@@ -70,8 +70,12 @@ def ensure(player: Player) -> CasinoBiz:
 
 
 def casino_name(player: Player) -> str:
-    """赌场名称 = 玩家昵称 + 「赌场」。"""
-    base = (player.custom_name or player.name or "无名").strip()
+    """赌场名称以集团（公司）冠名，例如「星海集团赌场」。
+
+    优先使用集团名 ``player.company_name``（如「星海集团」），未登记集团时
+    退而使用玩家昵称。
+    """
+    base = (player.company_name or player.custom_name or player.name or "无名").strip()
     if base.endswith("赌场"):
         return base
     return f"{base}赌场"

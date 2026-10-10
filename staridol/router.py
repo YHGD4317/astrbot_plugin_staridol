@@ -815,19 +815,21 @@ class Router:
 
     async def _cmd_dividend(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         """收取下属公司分红 + 领取经营赌场净利。"""
-        company_total = eco_sys.collect_dividend(self.store, player)
+        company_pending = eco_sys.total_dividend_pending(player)
         casino_total = casino_biz_sys.collect_dividend(self.store, player)
+        company_total = 0
+        if company_pending > 0:
+            # 下属公司分红：先算待提取额，再真正提取
+            eco_sys.collect_dividend(self.store, player)
+            company_total = company_pending
         total = company_total + casino_total
         if total <= 0:
             return Result.fail("当前没有可领取的分红。\n下属公司分红与经营赌场净利都会在此一并领取。")
         lines = [f"已领取分红 **{U.fmt_money(total)}**"]
-        parts: list[str] = []
         if company_total:
-            parts.append(f"下属公司 {U.fmt_money(company_total)}")
+            lines.append(f"- 下属公司 {U.fmt_money(company_total)}")
         if casino_total:
-            parts.append(f"赌场净利 {U.fmt_money(casino_total)}")
-        if parts:
-            lines.append("、".join(f"- {d}" for d in parts))
+            lines.append(f"- 赌场净利 {U.fmt_money(casino_total)}")
         lines.append(f"**现金**：{U.fmt_money(player.cash)}")
         return Result.success(text="\n".join(lines))
 
