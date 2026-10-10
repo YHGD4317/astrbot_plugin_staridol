@@ -383,11 +383,10 @@ def render_staff_list(player: Player) -> Card:
     模拟的作息动态，并可与另一名空闲艺人形成联动。所有状态均不展示剩余时长。
     仅空闲状态自然恢复体力。
     """
-    #: 一键填入的空闲艺人上限（与单个项目最多投放人数一致）
-    MAX_IDLE = 6
     ts = U.now()
     idle_set = [a for a in player.artists if not a.is_busy(ts)]
-    idle_names: list[str] = []
+    # 一键呼叫全部空闲艺人（不再限制人数）
+    idle_names = [a.name for a in player.artists if not a.is_busy(ts)]
     lines = [f"# {player.company_name or '集团'} · 员工名册（{len(player.artists)}）"]
     if player.artists:
         for artist in player.artists:
@@ -403,8 +402,6 @@ def render_staff_list(player: Player) -> Card:
                 lines.append(f"　{artist.status_line(ts)}")
             else:
                 lines.append(f"　{idle_scene(artist, ts, idle_set)}")
-                if len(idle_names) < MAX_IDLE:
-                    idle_names.append(artist.name)
     else:
         lines.append("暂无艺人，发送「今日秀场」开始招募。")
     lines.append("")
@@ -694,28 +691,28 @@ def render_casino_biz(player: Player) -> Card:
     if biz is None:
         biz = biz_sys.ensure(player)
     name = biz_sys.casino_name(player)
+    win_rate = biz_sys.casino_win_rate(player)
     traffic = sorted(biz.traffic.items(), key=lambda kv: kv[1], reverse=True)
     lines = [
         f"# {name} · 信息面板",
-        f"**注资**：{U.fmt_money(biz.invest)}　**筹码汇率**：1 筹码 = {U.fmt_money(biz.chip_value)}",
+        f"**注资**：{U.fmt_money(biz.invest)}　**荷官胜率**：{win_rate}",
+        f"**筹码汇率**：1 筹码 = {U.fmt_money(biz.chip_value)}",
         f"**今日收益**：{U.fmt_signed(biz.today_income)}　**可领分红**：{U.fmt_money(biz.claimable)}",
-        f"**NPC 游玩**：累计 {biz.npc_count} 人次　**累计收益**：{U.fmt_signed(biz.total_income)}",
+        f"**累计人流**：{U.fmt_traffic(biz.npc_count)}　**累计收益**：{U.fmt_signed(biz.total_income)}",
         "",
+        "**玩法 · 人流**",
     ]
-    if biz.recent_visitors:
-        lines.append(f"**近期访客**：{'、'.join(biz.recent_visitors)}")
-        lines.append("")
-    lines.append("**玩法 · 人流**")
     if traffic:
         for game, count in traffic:
-            lines.append(f"{game}：{count} 人")
+            lines.append(f"{game}：{U.fmt_traffic(count)}")
     else:
         lines.append("暂无 NPC 游玩，等他们陆续进来吧。")
     lines.append("")
     lines.append(
-        "> 荷官赢了（NPC 输）注资增加，NPC 赢则会拿走一部分钱。\n"
-        "> 发送「投资赌场（数额）」注资、「调整赌场汇率（数额）」改汇率、"
-        "「领取分红」提现净利。"
+        "> 人流与收益随注资、赢率、汇率联动：注资多/赢率高/汇率低→客流旺但单注小，\n"
+        "> 注资低/赢率低/汇率高→客流稀但单注巨大、收益大起大落。\n"
+        "> 发送「投资赌场（数额）」注资、「调整赌场汇率（数额）」改汇率、\n"
+        "> 发送「调整赌场赢率（百分数）」改赢率、「领取分红」提现净利。"
     )
     if biz.claimable > 0:
         return Card(markdown="\n".join(lines)).with_buttons(

@@ -158,6 +158,13 @@ class Router:
                 ),
                 "casino_biz_rate",
             ),
+            (
+                re.compile(
+                    r"^(?:调整赌场赢率|设置赌场赢率|改赌场赢率|修改赌场赢率|调整赢率)\s*"
+                    r"(?P<percent>\d{1,3})\s*%?\s*$"
+                ),
+                "casino_biz_winrate",
+            ),
             (re.compile(rf"^(?:查询|查)\s*(?P<name>{NAME})$"), "query_artist"),
             (re.compile(rf"^聘用\s*(?P<name>{NAME})$"), "hire"),
             (re.compile(rf"^(?:解聘|解雇|开除|解约)\s*(?P<names>.{{1,50}})$"), "fire"),
@@ -877,6 +884,10 @@ class Router:
     async def _cmd_casino_biz_rate(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         value = parse_amount(match.group("value"))
         return casino_biz_sys.set_chip_value(self.store, player, value)
+
+    async def _cmd_casino_biz_winrate(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        percent = int(match.group("percent"))
+        return casino_biz_sys.set_win_rate(self.store, player, percent)
 
     # ------------------------------------------------------------------
     # 管理

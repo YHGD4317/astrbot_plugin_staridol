@@ -3,13 +3,17 @@
 与玩家自己下注的玩法赌场（``casino.py``）不同，这里经营的是"别人来玩的赌场"。
 
 规则概述：
-  * 每个玩家可开设一间以自己名字命名的赌场，并自行设置筹码汇率（一枚筹码 = …w）。
+  * 每个玩家可开设一间以自己名字命名的赌场，并自行设置筹码汇率（一枚筹码 = …w）
+    与荷官胜率（赢率）。
   * 玩家通过「投资赌场（数额）」注入赌资（``invest``）。
   * NPC 会周期性地进入赌场游玩：荷官赢了（NPC 输了）会让 ``invest`` 与
     ``reserved``（可领取净利润）增加；荷官输了（NPC 赢了）钱会被 NPC 拿走，
     ``invest`` 与可领取净利润随之减少。
+  * 人流与收益随注资、赢率、筹码汇率联动：
+      - 注资多 / 赢率高 / 汇率低 → 人流多，客源以小额娱乐玩家为主，单注小、收益稳而少；
+      - 注资低 / 赢率低 / 汇率高 → 人流少，来的都是大额豪客，单注巨大、收益上下波动剧烈。
   * 「领取分红」把 ``invest - injected``（净利润）提现，之后资金池回到注入底金。
-  * 「查询赌场」展示经营面板：注资、今日收益、玩法/人流。
+  * 「查询赌场」展示经营面板：注资、赢率、汇率、今日收益、玩法/人流（人流按 w 计）。
 
 所有面向玩家的文案均不使用 emoji。
 """
@@ -40,8 +44,11 @@ NPC_GAMES: dict[str, str] = {
     "duel": "骰子大战",
 }
 
-#: 荷官胜率基线（赌场吃小赔大的"庄家优势"，明显高于一半才能稳定盈利）。
-HOUSE_EDGE = 0.62
+#: 荷官胜率（庄家赢牌概率）的允许范围，防止调出离谱数值。赢率 = 玩家设定的荷官胜率。
+WIN_RATE_RANGE = (0.30, 0.90)
+
+#: 默认荷官胜率（0.62 即 62%）。新赌场以此为初始赢率。
+DEFAULT_WIN_RATE = 0.62
 
 #: 每批 NPC 游玩所间隔的时长范围（秒），控制游玩节奏，避免资金暴涨。
 VISIT_INTERVAL_RANGE = (600.0, 1800.0)
@@ -81,6 +88,12 @@ def casino_name(player: Player) -> str:
     return f"{base}赌场"
 
 
+def casino_win_rate(player: Player) -> str:
+    """当前赌场的荷官胜率展示字符串，如「62%」。"""
+    biz = ensure(player)
+    return f"{int(round(biz.win_rate * 100))}%"
+
+
 def _roll_daily(biz: CasinoBiz, ts: float | None = None) -> bool:
     """跨天时把今日收益归零，返回是否发生了跨天。"""
     ts = ts if ts is not None else U.now()
@@ -93,20 +106,54 @@ def _roll_daily(biz: CasinoBiz, ts: float | None = None) -> bool:
 
 
 def _bet_amount(biz: CasinoBiz) -> int:
-    """根据当前资金池与筹码汇率估算一局的赌注（w）。
+    """根据注资、赢率与筹码汇率估算一局的赌注（w）。
 
-    赌注约为资金池的 0.2%~0.8%，同时以筹码汇率作下限，保证小额资金池也能开局。
+    规则（联动注资、赢率、汇率）：
+      * 汇率越高 → 一枚筹码越值钱，来的多是豪客，单注越大；
+      * 赢率越低 → 荷官胜率低、赔率高，敢来的都是搏命赌徒，单注越大；
+      * 注资越多 → 盘口底子越厚，单注越大（对数缩放，避免暴涨）。
+
+    赌注同时受资金池约束，保证荷官赔得起（不超资金池的 8%）。
     """
-    base = max(biz.chip_value, 1)
-    scaled = int(biz.invest * random.uniform(0.002, 0.008))
-    return max(1, max(base, scaled))
+    chip_t = max(1.0, biz.chip_value / float(C.CHIP_VALUE))
+    low, _ = WIN_RATE_RANGE
+    rate_t = max(low, biz.win_rate)
+    rate_t = DEFAULT_WIN_RATE / rate_t  # 赢率越低→单注越大
+    invest_t = (max(0.0, float(biz.invest)) / 1000.0 + 1.0) ** 0.5
+    bet = max(1, int(round(chip_t * rate_t * invest_t)))
+    # 荷官要赔得起：单局最多赔出资金池的 8%
+    bet = min(bet, max(1, int(biz.invest * 0.08)))
+    return max(1, bet)
+
+
+def _traffic_amount(biz: CasinoBiz) -> int:
+    """按注资、赢率与筹码汇率折算一批 NPC 到来后的人数（w 为单位的 人次）。
+
+    规则（联动注资、赢率、汇率）：
+      * 注资多 → 盘口热闹，来玩的人多；
+      * 赢率高 → 客源多是小额娱乐玩家，门槛低、人来得多；
+      * 汇率低 → 一枚筹码便宜，门槛低，人来得多。
+    返回以\"人次\"为单位、最终以 w/h（万人）方式展示的整数值。
+    """
+    invest_f = 1.0 + (max(0.0, float(biz.invest)) / 1500.0)
+    win_f = max(WIN_RATE_RANGE[0], biz.win_rate) / DEFAULT_WIN_RATE
+    chip_f = float(C.CHIP_VALUE) / max(1, biz.chip_value)
+    value = 60.0 * invest_f * win_f * chip_f
+    return max(random.randint(30, 90), int(round(value)))
 
 
 def _npc_round(biz: CasinoBiz, name: str) -> str:
-    """模拟一次 NPC 游玩，返回一句事件描述。"""
+    """模拟一次 NPC 游玩，返回一句事件描述。
+
+    输赢由玩家设定的荷官胜率 ``biz.win_rate`` 决定：随机小于胜率则荷官赢，
+    否则 NPC 赢（钱被拿走）。人流按 ``_traffic_amount`` 计入（w 为单位）。
+    """
     game_name = random.choice(list(NPC_GAMES.values()))
     bet = _bet_amount(biz)
-    if random.random() < HOUSE_EDGE:
+    traffic_add = _traffic_amount(biz)
+    biz.npc_count += traffic_add
+    biz.traffic[game_name] = biz.traffic.get(game_name, 0) + traffic_add
+    if random.random() < biz.win_rate:
         # 荷官赢（NPC 输）：资金池与净利润增加
         bet = max(1, bet)
         biz.invest += bet
@@ -137,18 +184,11 @@ def npc_tick(store: GameStore, player: Player, ts: float | None = None) -> list[
     biz.last_visit_at = ts
     rounds = random.randint(*BATCH_ROUNDS_RANGE)
     events: list[str] = []
-    visitors: list[str] = []
     for _ in range(rounds):
         if biz.invest <= 0:
             break
         name = random.choice(_NPC_NAMES)
         events.append(_npc_round(biz, name))
-        players_game = random.choice(list(NPC_GAMES.values()))
-        biz.traffic[players_game] = biz.traffic.get(players_game, 0) + 1
-        biz.npc_count += 1
-        if name not in visitors and len(visitors) < 5:
-            visitors.append(name)
-    biz.recent_visitors = visitors
     store.mark_dirty()
     return events
 
@@ -167,10 +207,13 @@ def panel(store: GameStore, player: Player) -> Result:
             "",
             "NPC 会随时来你的赌场玩耍，但荷官需要足够的注资才能赔得起。",
             f"发送「投资赌场（数额）」注入赌资开始经营，例如：投资赌场1000。",
-            f"当前筹码汇率：1 筹码 = {C.CHIP_VALUE}w，可发送「调整赌场汇率（数额）」修改。",
+            f"当前筹码汇率：1 筹码 = {C.CHIP_VALUE}w、荷官胜率：{int(round(DEFAULT_WIN_RATE * 100))}%，",
+            "可发送「调整赌场汇率（数额）」「调整赌场赢率（百分数）」修改。",
             "",
             "> 说明：荷官赢了（NPC 输）会增加注资，NPC 赢了则会拿走一部分钱。",
             "> 「领取分红」可以把净利提现，例如查询后发送「领取分红」。",
+            "> 人流与收益随注资、赢率、汇率联动：注资多/赢率高/汇率低→客流旺但单注小，",
+            "> 注资低/赢率低/汇率高→客流稀但单注巨大、收益大起大落。",
         ]
         return Result.success(card=R.Card(markdown="\n".join(lines)))
     return Result.success(card=R.render_casino_biz(player))
@@ -213,6 +256,30 @@ def set_chip_value(store: GameStore, player: Player, value: int) -> Result:
         text=(
             f"已调整「{casino_name(player)}」的筹码汇率：1 筹码 = {U.fmt_money(value)}。\n"
             "NPC 下注会按新汇率计算。"
+        )
+    )
+
+
+def set_win_rate(store: GameStore, player: Player, percent: int) -> Result:
+    """调整赌场荷官胜率（赢率，百分数，如 62 表示 62%）。"""
+    low_pct = int(round(WIN_RATE_RANGE[0] * 100))
+    high_pct = int(round(WIN_RATE_RANGE[1] * 100))
+    percent = int(percent or 0)
+    if percent < low_pct or percent > high_pct:
+        return Result.fail(f"荷官胜率需要在 {low_pct}%~{high_pct}% 之间（如：调整赌场赢率62）。")
+    biz = ensure(player)
+    biz.win_rate = percent / 100.0
+    store.mark_dirty()
+    if percent > int(round(DEFAULT_WIN_RATE * 100)):
+        trend = "客源增多但单注变小，收益更稳、增量更少"
+    elif percent < int(round(DEFAULT_WIN_RATE * 100)):
+        trend = "客源减少但单注变大，一旦来客收益上落幅度大"
+    else:
+        trend = "采用默认基准配置"
+    return Result.success(
+        text=(
+            f"已把「{casino_name(player)}」的荷官胜率调整为 **{percent}%**。\n"
+            f"当前 {trend}。发送「查询赌场」查看效果。"
         )
     )
 

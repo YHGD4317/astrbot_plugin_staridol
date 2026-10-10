@@ -565,6 +565,10 @@ class CasinoBiz:
 
     #: 筹码汇率：该赌场内一枚筹码的价值（w）。玩家可自行调整。
     chip_value: int = 100
+    #: 荷官胜率（庄家赢牌概率，0~1）。玩家可自行调整。
+    #: 赢率越高→客源越多但单注越小（娱乐玩家为主）；
+    #: 赢率越低→客源越少但单注越大（搏命豪客为主），收益上下波动更剧烈。
+    win_rate: float = 0.62
     #: 当前赌场资金池（注资）。NPC 输赢直接在此增减。
     invest: int = 0
     #: 玩家累计注入的底金（w），用于计算可领取净利润。
@@ -577,10 +581,8 @@ class CasinoBiz:
     total_income: int = 0
     #: 累计 NPC 游玩人次。
     npc_count: int = 0
-    #: 各玩法的人流：玩法名 -> 累计游玩人次。
+    #: 各玩法的人流：玩法名 -> 累计人流量（以 w 为单位）。
     traffic: dict[str, int] = field(default_factory=dict)
-    #: 最近一批 NPC 访客姓名（用于面板展示）。
-    recent_visitors: list[str] = field(default_factory=list)
     #: 上次模拟 NPC 游玩的时刻（秒），用于控制游玩节奏。
     last_visit_at: float = 0.0
 
@@ -592,6 +594,7 @@ class CasinoBiz:
     def to_dict(self) -> dict[str, Any]:
         return {
             "chip_value": self.chip_value,
+            "win_rate": self.win_rate,
             "invest": self.invest,
             "injected": self.injected,
             "today_income": self.today_income,
@@ -599,7 +602,6 @@ class CasinoBiz:
             "total_income": self.total_income,
             "npc_count": self.npc_count,
             "traffic": {str(k): int(v) for k, v in self.traffic.items()},
-            "recent_visitors": list(self.recent_visitors),
             "last_visit_at": self.last_visit_at,
         }
 
@@ -609,6 +611,7 @@ class CasinoBiz:
             return None
         biz = cls()
         biz.chip_value = int(data.get("chip_value") or 100)
+        biz.win_rate = float(data.get("win_rate") or 0.62)
         biz.invest = int(data.get("invest") or 0)
         biz.injected = int(data.get("injected") or 0)
         biz.today_income = int(data.get("today_income") or 0)
@@ -616,7 +619,6 @@ class CasinoBiz:
         biz.total_income = int(data.get("total_income") or 0)
         biz.npc_count = int(data.get("npc_count") or 0)
         biz.traffic = _dict_to_int(data.get("traffic"))
-        biz.recent_visitors = [str(x) for x in (data.get("recent_visitors") or [])]
         biz.last_visit_at = float(data.get("last_visit_at") or 0.0)
         return biz
 

@@ -518,11 +518,22 @@ async def main() -> None:
     check(CB.set_chip_value(store, player, 50).ok and biz.chip_value == 50, "调整筹码汇率成功")
     check(not CB.set_chip_value(store, player, -5).ok, "非法汇率被拒绝")
     check(not CB.set_chip_value(store, player, 99999999).ok, "过大汇率被拒绝")
+    # 调整荷官胜率（赢率）
+    check(CB.set_win_rate(store, player, 70).ok and abs(biz.win_rate - 0.70) < 1e-6, "调整荷官胜率成功")
+    check(not CB.set_win_rate(store, player, 10).ok, "过小赢率被拒绝")
+    check(not CB.set_win_rate(store, player, 99).ok, "过大赢率被拒绝")
+    # 人流按 w（万）联动：汇率越低 → 单批人流越旺
+    def _flatten_tick():
+        biz.last_visit_at = 0
+        CB.npc_tick(store, player, U.now())
+        return dict(biz.traffic)
+    base_traffic = sum(_flatten_tick().values())
+    check(base_traffic > 0, "单批人流大于 0", str(base_traffic))
     # NPC 游玩推进
     biz.last_visit_at = 0  # 强制立即触发一批
     events = CB.npc_tick(store, player, U.now())
     check(len(events) > 0, "NPC 进入赌场游玩", str(len(events)))
-    check(biz.npc_count == len(events), "游玩人次统计", f"{biz.npc_count} vs {len(events)}")
+    check(biz.npc_count >= len(events), "游玩人次被累计（按 w 放大人流）", f"{biz.npc_count} vs {len(events)}")
     check(biz.traffic, "玩法人流已记录", str(biz.traffic))
     check(sum(biz.traffic.values()) == biz.npc_count, "人流总和 = 游玩人次")
     # 荷官有优势：多批游玩后整体大概率盈利（可领取分红）

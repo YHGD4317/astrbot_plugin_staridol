@@ -90,6 +90,19 @@ def fmt_number(value: float) -> str:
     return str(value)
 
 
+def fmt_traffic(value: float) -> str:
+    """赌场人流显示：按 w（万）为单位紧凑展示，如 3.2w / 1.5亿人次。
+
+    与 ``fmt_money`` 的 w/亿 约定一致，方便与金额对比。
+    """
+    value = int(value)
+    if value >= 100_000_000:  # 1 亿人次
+        return f"{value / 100_000_000:.2f}亿"
+    if value >= 10_000:  # 1 万 = 1w
+        return f"{value / 10_000:.1f}w"
+    return f"{value}"
+
+
 def fmt_score(score: float) -> str:
     """评分保留一位小数。"""
     return f"{round(score + 1e-9, 1):.1f}"

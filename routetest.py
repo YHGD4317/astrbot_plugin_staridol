@@ -226,6 +226,10 @@ def main() -> None:
         ("调整赌场汇率200", "casino_biz_rate"),
         ("设置赌场汇率500w", "casino_biz_rate"),
         ("改赌场汇率100", "casino_biz_rate"),
+        ("调整赌场赢率62", "casino_biz_winrate"),
+        ("设置赌场赢率80%", "casino_biz_winrate"),
+        ("改赌场赢率35", "casino_biz_winrate"),
+        ("调整赢率55", "casino_biz_winrate"),
         # 非游戏消息
         ("今天天气怎么样", None),
         ("在吗", None),
