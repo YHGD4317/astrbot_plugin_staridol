@@ -24,6 +24,7 @@ from .qqcard import CardSender
 from .render import Card
 from .store import GameStore
 from .systems import artist as artist_sys
+from .systems import casino_biz as casino_biz_sys
 from .systems import daily as daily_sys
 from .systems import project as project_sys
 
@@ -165,4 +166,11 @@ class GameScheduler:
             text = project_sys.settle_project(self.store, player, project, ts)
             if text:
                 pending.append((player, Card(markdown=text)))
+
+        # ---- 经营赌场：让 NPC 进入游玩（静默推进，不主动打扰玩家）----
+        if player.casino_biz is not None:
+            try:
+                casino_biz_sys.npc_tick(self.store, player, ts)
+            except Exception:
+                pass
         self.store.mark_dirty()

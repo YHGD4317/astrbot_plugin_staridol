@@ -25,6 +25,7 @@ from .result import Result
 from .store import GameStore
 from .systems import artist as artist_sys
 from .systems import casino as casino_sys
+from .systems import casino_biz as casino_biz_sys
 from .systems import daily as daily_sys
 from .systems import economy as eco_sys
 from .systems import project as project_sys
@@ -86,7 +87,7 @@ def parse_count(raw: str | None) -> int:
 def split_names(raw: str) -> list[str]:
     """按分隔符拆分艺人名。"""
     parts = re.split(r"[、,，\s]+", (raw or "").strip())
-    return [p.strip("《》<>「」") for p in parts if p.strip("《》<>「」")]
+    return [p.strip("《》<>「」【】") for p in parts if p.strip("《》<>「」【】")]
 
 
 def has_placeholder(text: str) -> bool:
@@ -142,6 +143,21 @@ class Router:
             # ---- 艺人 ----
             (re.compile(r"^(?:今日秀场|今日选秀|秀场|选秀)$"), "show"),
             (re.compile(r"^(?:员工|员工列表|艺人列表|我的艺人)$"), "staff"),
+            # ---- 投资赌场（NPC 经营赌场），放在「查询」之前以免被当作查询艺人 ----
+            (re.compile(r"^(?:查询赌场|我的赌场|赌场经营|赌场面板|经营赌场)$"), "casino_biz_panel"),
+            (
+                re.compile(
+                    r"^(?:投资赌场|给赌场注资|注资赌场)\s*(?P<amount>[\d.]+)\s*[wW万亿]?\s*$"
+                ),
+                "casino_biz_invest",
+            ),
+            (
+                re.compile(
+                    r"^(?:调整赌场汇率|设置赌场汇率|改赌场汇率|修改赌场汇率)\s*"
+                    r"(?P<value>[\d.]+)\s*[wW万]?\s*$"
+                ),
+                "casino_biz_rate",
+            ),
             (re.compile(rf"^(?:查询|查)\s*(?P<name>{NAME})$"), "query_artist"),
             (re.compile(rf"^聘用\s*(?P<name>{NAME})$"), "hire"),
             (re.compile(rf"^(?:解聘|解雇|开除|解约)\s*(?P<names>.{{1,50}})$"), "fire"),
@@ -150,7 +166,12 @@ class Router:
                 re.compile(rf"^(?P<name>{NAME}?)去(?:训练|练习|学习)(?P<attr>{ARTIST_ATTR_PATTERN})$"),
                 "train",
             ),
+            (
+                re.compile(rf"^(?:给)?(?P<names>.{{1,60}}?)去(?:训练|练习|学习)(?P<attr>{ARTIST_ATTR_PATTERN})$"),
+                "train_many",
+            ),
             (re.compile(rf"^(?P<name>{NAME}?)去(?:休息|休假)$"), "rest"),
+            (re.compile(rf"^(?:给)?(?P<names>.{{1,60}}?)去(?:休息|休假)$"), "rest_many"),
             # ---- 今日事务 ----
             (re.compile(r"^(?:今日行程|今日事务|事务|行程)$"), "quest"),
             (re.compile(r"^(?:事务进度|事务列表)$"), "quest_summary"),
@@ -226,6 +247,13 @@ class Router:
                     rf"(?:\s*(?:给|对)\s*(?P<target>{NAME}))?$"
                 ),
                 "use_item",
+            ),
+            (
+                re.compile(
+                    rf"^(?:给|对)\s*(?P<names>.{{1,60}}?)\s*(?:使用|用)\s*"
+                    rf"(?P<count>\d+)?\s*个?\s*(?P<name>{ITEM_PATTERN})$"
+                ),
+                "use_item_many",
             ),
             (re.compile(rf"^创建\s*(?P<type>{COMPANY_PATTERN})$"), "create_company"),
             (re.compile(r"^(?:收取分红|领取分红|分红)$"), "dividend"),
@@ -571,6 +599,20 @@ class Router:
             return Result.fail(f"名册中没有「{name}」，可发送「员工」查看。")
         return artist_sys.train(self.store, player, artist, match.group("attr"))
 
+    async def _cmd_train_many(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        if not player.points_assigned:
+            return self._need_register(player)
+        names = split_names(match.group("names"))
+        if not names:
+            return Result.fail("请指定要训练的艺人，例如「张三、李四去训练舞蹈」。")
+        return artist_sys.train_many(self.store, player, names, match.group("attr"))
+
+    async def _cmd_rest_many(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        names = split_names(match.group("names"))
+        if not names:
+            return Result.fail("请指定要休息的艺人，例如「张三、李四去休息」。")
+        return artist_sys.rest_many(self.store, player, names)
+
     async def _cmd_rest(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         name = match.group("name")
         artist = player.find_artist(name)
@@ -757,13 +799,37 @@ class Router:
             parse_count(match.group("count")),
         )
 
+    async def _cmd_use_item_many(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        return eco_sys.use_item_many(
+            self.store,
+            player,
+            split_names(match.group("names")),
+            parse_count(match.group("count")),
+            (match.group("name") or "").strip(),
+        )
+
     async def _cmd_create_company(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
         if not player.points_assigned:
             return self._need_register(player)
         return eco_sys.create_company(self.store, player, match.group("type"))
 
     async def _cmd_dividend(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
-        return eco_sys.collect_dividend(self.store, player)
+        """收取下属公司分红 + 领取经营赌场净利。"""
+        company_total = eco_sys.collect_dividend(self.store, player)
+        casino_total = casino_biz_sys.collect_dividend(self.store, player)
+        total = company_total + casino_total
+        if total <= 0:
+            return Result.fail("当前没有可领取的分红。\n下属公司分红与经营赌场净利都会在此一并领取。")
+        lines = [f"已领取分红 **{U.fmt_money(total)}**"]
+        parts: list[str] = []
+        if company_total:
+            parts.append(f"下属公司 {U.fmt_money(company_total)}")
+        if casino_total:
+            parts.append(f"赌场净利 {U.fmt_money(casino_total)}")
+        if parts:
+            lines.append("、".join(f"- {d}" for d in parts))
+        lines.append(f"**现金**：{U.fmt_money(player.cash)}")
+        return Result.success(text="\n".join(lines))
 
     # ------------------------------------------------------------------
     # 赌场
@@ -797,6 +863,18 @@ class Router:
         player.casino.clear()
         self.store.mark_dirty()
         return Result.success(text=f"已结束当前「{name}」赌局，已下注的筹码不退还。")
+
+    # ---------- 投资赌场（NPC 经营赌场）----------
+    async def _cmd_casino_biz_panel(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        return casino_biz_sys.panel(self.store, player)
+
+    async def _cmd_casino_biz_invest(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        amount = parse_amount(match.group("amount"))
+        return casino_biz_sys.invest(self.store, player, amount)
+
+    async def _cmd_casino_biz_rate(self, player: Player, event: AstrMessageEvent, match: re.Match) -> Result:
+        value = parse_amount(match.group("value"))
+        return casino_biz_sys.set_chip_value(self.store, player, value)
 
     # ------------------------------------------------------------------
     # 管理

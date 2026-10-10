@@ -21,6 +21,8 @@ from staridol import utils as U  # noqa: E402
 from staridol.models import Artist, Company  # noqa: E402
 from staridol.store import GameStore  # noqa: E402
 from staridol.systems import artist as A  # noqa: E402
+from staridol.systems import casino as CAS  # noqa: E402
+from staridol.systems import casino_biz as CB  # noqa: E402
 from staridol.systems import daily as D  # noqa: E402
 from staridol.systems import economy as E  # noqa: E402
 from staridol.systems import project as P  # noqa: E402
@@ -495,6 +497,55 @@ async def main() -> None:
     # 重开时释放持股
     store.remove_player("20002")
     check(own.holders.get("20002") is None, "玩家重开后其持股被释放")
+
+    # ------------------------------------------------------------ 投资赌场（NPC 经营赌场）
+    print("\n=== 11.9 投资赌场（NPC 经营）===")
+    player.casino_biz = None  # 清空便于独立测试
+    player.cash = 100000
+    # 尚未注资时查询给出引导
+    panel = CB.panel(store, player)
+    check(not panel.ok or "投资赌场" in (panel.card.markdown if panel.card else ""), "未注资时面板给出引导")
+    check(CB.casino_name(player) == "测试总裁赌场", "赌场名称 = 玩家昵称 + 赌场", CB.casino_name(player))
+    # 投资赌场
+    before = player.cash
+    res = CB.invest(store, player, 5000)
+    check(res.ok, "投资赌场成功", res.text)
+    check(player.cash == before - 5000, "投资扣款", f"{player.cash} vs {before - 5000}")
+    biz = player.casino_biz
+    check(biz.invest == 5000 and biz.injected == 5000, "注资与底金记录", f"{biz.invest}/{biz.injected}")
+    check(not CB.invest(store, player, 999999999).ok, "资金不足时不能投资")
+    # 调整筹码汇率
+    check(CB.set_chip_value(store, player, 50).ok and biz.chip_value == 50, "调整筹码汇率成功")
+    check(not CB.set_chip_value(store, player, -5).ok, "非法汇率被拒绝")
+    check(not CB.set_chip_value(store, player, 99999999).ok, "过大汇率被拒绝")
+    # NPC 游玩推进
+    biz.last_visit_at = 0  # 强制立即触发一批
+    events = CB.npc_tick(store, player, U.now())
+    check(len(events) > 0, "NPC 进入赌场游玩", str(len(events)))
+    check(biz.npc_count == len(events), "游玩人次统计", f"{biz.npc_count} vs {len(events)}")
+    check(biz.traffic, "玩法人流已记录", str(biz.traffic))
+    check(sum(biz.traffic.values()) == biz.npc_count, "人流总和 = 游玩人次")
+    # 荷官有优势：多批游玩后整体大概率盈利（可领取分红）
+    for _ in range(40):
+        biz.last_visit_at = 0
+        CB.npc_tick(store, player, U.now())
+    check(biz.invest > biz.injected, "多批游玩后荷官整体盈利", f"invest={biz.invest} injected={biz.injected}")
+    claim = biz.claimable
+    check(claim > 0, "存在可领取净利润", f"{claim}")
+    # 领取分红
+    cash_before_claim = player.cash
+    got = CB.collect_dividend(store, player)
+    check(got == claim, "领取分红金额正确", f"{got} vs {claim}")
+    check(player.cash == cash_before_claim + claim, "分红已到账")
+    check(biz.invest == biz.injected, "领取后资金池回到底金")
+    # 面板渲染
+    card = CB.panel(store, player)
+    md = card.card.markdown if card.card else (card.text or "")
+    check("信息面板" in md and "注资" in md and "今日收益" in md, "经营面板包含注资/收益/玩法人流", brief(md, 120))
+    render_card = R.render_casino_biz(player)
+    check("信息面板" in render_card.markdown and "人流" in render_card.markdown, "render_casino_biz 渲染正常")
+    # 玩法赌场（玩家自己下注）与经营赌场互不干扰：原「赌场」菜单仍可用
+    check(CAS.menu(player).ok, "原有玩法赌场菜单仍可打开")
 
     # ------------------------------------------------------------ 每日刷新
     print("\n=== 12. 每日刷新与档位 ===")

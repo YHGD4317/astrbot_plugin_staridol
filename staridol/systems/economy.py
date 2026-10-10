@@ -470,6 +470,88 @@ def use_item(store: GameStore, player: Player, name: str, target: str = "", coun
     return Result.fail(f"「{name}」暂时无法使用。")
 
 
+def use_item_many(store: GameStore, player: Player, names: list[str], count: int, name: str) -> Result:
+    """批量给多名艺人使用道具，数量在艺人之间平均分配。
+
+    例如「给张三、李四使用4个能量饮料」：4 个道具在 2 人之间尽量平分
+    （每人 2 个），有多余时按序列靠前的艺人多分 1 个。只支持对艺人生效的
+    道具（属性类 / 体力恢复类）。
+    """
+    name = (name or "").strip()
+    tpl = C.ITEMS.get(name)
+    if tpl is None:
+        return Result.fail(f"没有「{name}」这件道具。")
+    names = [n for n in (names or []) if n]
+    if not names:
+        return Result.fail(f"请指定要使用的艺人，例如「给张三、李四使用{count}个{name}」。")
+    count = max(1, int(count))
+
+    # 只有针对艺人的道具才支持批量分发
+    if tpl.kind == "attr" and tpl.target != "artist":
+        return Result.fail(f"「{name}」是提升玩家属性的道具，不支持批量给多个艺人使用。")
+    if tpl.kind == "restore" and tpl.restore != "stamina":
+        return Result.fail(f"「{name}」不是对艺人生效的恢复道具，不支持批量分发。")
+    if tpl.kind in ("temp", "box"):
+        return Result.fail(f"「{name}」不支持批量指定艺人使用。")
+
+    have = int(player.items.get(name, 0))
+    if have <= 0:
+        return Result.fail(f"背包里没有「{name}」了，可发送「打开商城」购买。")
+
+    missing: list[str] = []
+    artists: list[Artist] = []
+    for nm in names:
+        artist = player.find_artist(nm)
+        if artist is None:
+            missing.append(nm)
+        else:
+            artists.append(artist)
+    if not artists:
+        parts = "名册中没有找到：" + "、".join(missing) if missing else "请指定要使用道具的艺人。"
+        return Result.fail(parts)
+
+    # 平均分配：count 个道具在 n 位艺人之间尽量平分，剩余的前几位每人多 1 个
+    count = min(count, have)
+    n = len(artists)
+    base, extra = divmod(count, n)
+    shares = [base] * n
+    for i in range(extra):
+        shares[i] += 1
+
+    ts = U.now()
+    consumed = sum(shares)
+    lines = [
+        "# 批量使用道具",
+        f"已使用 **{name}** ×{consumed}，在 {n} 位艺人之间平均分配：",
+    ]
+
+    if tpl.kind == "attr":
+        attr_cn = C.ARTIST_ATTR_CN.get(tpl.attr, "属性")
+        for artist, share in zip(artists, shares):
+            before = artist.get(tpl.attr)
+            for _ in range(share):
+                artist.add(tpl.attr, tpl.value)
+            acted = artist.get(tpl.attr) - before
+            lines.append(
+                f"- **{artist.name}** ×{share}：{attr_cn} +{acted}（当前 {artist.get(tpl.attr)}）"
+            )
+    else:  # restore == stamina
+        for artist, share in zip(artists, shares):
+            artist_sys.regen_stamina(artist, ts)
+            before = artist.stamina
+            artist.stamina = min(100, artist.stamina + tpl.value * share)
+            lines.append(
+                f"- **{artist.name}** ×{share}：体力 {before} → **{artist.stamina}/100**"
+            )
+    player.items[name] -= consumed
+    store.mark_dirty()
+    lines.append("")
+    lines.append(f"剩余「{name}」×{player.items.get(name, 0)}")
+    if missing:
+        lines.append(f"未找到：{'、'.join(missing)}")
+    return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+
 # --------------------------------------------------------------------------
 # 公司与分红
 # --------------------------------------------------------------------------

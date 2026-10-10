@@ -545,6 +545,83 @@ class MarketCompany:
 
 
 # --------------------------------------------------------------------------
+# 投资赌场（NPC 赌场经营）
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class CasinoBiz:
+    """玩家开设、供 NPC 游玩的经营赌场。
+
+    每个玩家可以开设一间以自己名字命名的赌场，并可自行设置筹码汇率。
+    NPC 会随时间进入赌场游玩：
+      * 荷官赢了（NPC 输了）→ ``invest``（注资）增加，产生可领取的利润；
+      * 荷官输了（NPC 赢了）→ ``invest``（注资）减少，钱被 NPC 拿走。
+
+    玩家可通过「投资赌场（数额）」注入赌资，通过「领取分红」把净利提现。
+    净利润 = ``invest - injected``（当前资金池 - 累计注入底金），领取后
+    会计回到注入底金，因此不会把钱取空到影响经营。
+    """
+
+    #: 筹码汇率：该赌场内一枚筹码的价值（w）。玩家可自行调整。
+    chip_value: int = 100
+    #: 当前赌场资金池（注资）。NPC 输赢直接在此增减。
+    invest: int = 0
+    #: 玩家累计注入的底金（w），用于计算可领取净利润。
+    injected: int = 0
+    #: 今日收益（w，可为负），按自然日归零。
+    today_income: int = 0
+    #: 今日收益结算的日期（YYYY-MM-DD）。
+    today_date: str = ""
+    #: 累计收益（w，可为负）。
+    total_income: int = 0
+    #: 累计 NPC 游玩人次。
+    npc_count: int = 0
+    #: 各玩法的人流：玩法名 -> 累计游玩人次。
+    traffic: dict[str, int] = field(default_factory=dict)
+    #: 最近一批 NPC 访客姓名（用于面板展示）。
+    recent_visitors: list[str] = field(default_factory=list)
+    #: 上次模拟 NPC 游玩的时刻（秒），用于控制游玩节奏。
+    last_visit_at: float = 0.0
+
+    @property
+    def claimable(self) -> int:
+        """当前可领取的净利润（w），不会为负。"""
+        return max(0, int(self.invest) - int(self.injected))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "chip_value": self.chip_value,
+            "invest": self.invest,
+            "injected": self.injected,
+            "today_income": self.today_income,
+            "today_date": self.today_date,
+            "total_income": self.total_income,
+            "npc_count": self.npc_count,
+            "traffic": {str(k): int(v) for k, v in self.traffic.items()},
+            "recent_visitors": list(self.recent_visitors),
+            "last_visit_at": self.last_visit_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> CasinoBiz | None:
+        if not data:
+            return None
+        biz = cls()
+        biz.chip_value = int(data.get("chip_value") or 100)
+        biz.invest = int(data.get("invest") or 0)
+        biz.injected = int(data.get("injected") or 0)
+        biz.today_income = int(data.get("today_income") or 0)
+        biz.today_date = str(data.get("today_date") or "")
+        biz.total_income = int(data.get("total_income") or 0)
+        biz.npc_count = int(data.get("npc_count") or 0)
+        biz.traffic = _dict_to_int(data.get("traffic"))
+        biz.recent_visitors = [str(x) for x in (data.get("recent_visitors") or [])]
+        biz.last_visit_at = float(data.get("last_visit_at") or 0.0)
+        return biz
+
+
+# --------------------------------------------------------------------------
 # 玩家
 # --------------------------------------------------------------------------
 
@@ -574,6 +651,7 @@ class Player:
     items: dict[str, int] = field(default_factory=dict)
     buffs: dict[str, float] = field(default_factory=dict)
     casino: dict[str, Any] = field(default_factory=dict)  # 当前进行中的赌局状态
+    casino_biz: CasinoBiz | None = None  # 玩家开设的 NPC 经营赌场
     last_quest_date: str = ""
     quest_total: int = 0
     show_date: str = ""
@@ -784,6 +862,7 @@ class Player:
                 for (exp, cnt) in [self._buff_entry(v)]
             },
             "casino": self.casino,
+            "casino_biz": self.casino_biz.to_dict() if self.casino_biz else None,
             "last_quest_date": self.last_quest_date,
             "quest_total": self.quest_total,
             "show_date": self.show_date,
@@ -825,6 +904,7 @@ class Player:
         player.companies = [Company.from_dict(x) for x in (data.get("companies") or [])]
         player.items = _dict_to_int(data.get("items"))
         player.casino = dict(data.get("casino") or {})
+        player.casino_biz = CasinoBiz.from_dict(data.get("casino_biz"))
         player.buffs = {}
         for k, v in (data.get("buffs") or {}).items():
             key = str(k)

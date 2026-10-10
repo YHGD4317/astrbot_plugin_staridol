@@ -679,3 +679,46 @@ def render_shop(player: Player) -> Card:
     lines.append("")
     lines.append("发送「购买道具名」或「购买2个道具名」下单。")
     return Card(markdown="\n".join(lines)).with_buttons(rows[:5])
+
+
+# --------------------------------------------------------------------------
+# 投资赌场（NPC 经营赌场）
+# --------------------------------------------------------------------------
+
+
+def render_casino_biz(player: Player) -> Card:
+    """玩家开设的 NPC 赌场经营面板。"""
+    from .systems import casino_biz as biz_sys
+
+    biz = player.casino_biz
+    if biz is None:
+        biz = biz_sys.ensure(player)
+    name = biz_sys.casino_name(player)
+    traffic = sorted(biz.traffic.items(), key=lambda kv: kv[1], reverse=True)
+    lines = [
+        f"# {name} · 信息面板",
+        f"**注资**：{U.fmt_money(biz.invest)}　**筹码汇率**：1 筹码 = {U.fmt_money(biz.chip_value)}",
+        f"**今日收益**：{U.fmt_signed(biz.today_income)}　**可领分红**：{U.fmt_money(biz.claimable)}",
+        f"**NPC 游玩**：累计 {biz.npc_count} 人次　**累计收益**：{U.fmt_signed(biz.total_income)}",
+        "",
+    ]
+    if biz.recent_visitors:
+        lines.append(f"**近期访客**：{'、'.join(biz.recent_visitors)}")
+        lines.append("")
+    lines.append("**玩法 · 人流**")
+    if traffic:
+        for game, count in traffic:
+            lines.append(f"{game}：{count} 人")
+    else:
+        lines.append("暂无 NPC 游玩，等他们陆续进来吧。")
+    lines.append("")
+    lines.append(
+        "> 荷官赢了（NPC 输）注资增加，NPC 赢则会拿走一部分钱。\n"
+        "> 发送「投资赌场（数额）」注资、「调整赌场汇率（数额）」改汇率、"
+        "「领取分红」提现净利。"
+    )
+    if biz.claimable > 0:
+        return Card(markdown="\n".join(lines)).with_buttons(
+            [[button("领取分红", "领取分红"), button("投资赌场", "投资赌场1000")]]
+        )
+    return Card(markdown="\n".join(lines))

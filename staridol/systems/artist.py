@@ -207,6 +207,150 @@ def finish_rest(player: Player, artist: Artist, ts: float | None = None) -> str:
 
 
 # --------------------------------------------------------------------------
+# 批量训练 / 批量休息
+# --------------------------------------------------------------------------
+def train_many(store: GameStore, player: Player, names: list[str], attr_cn: str) -> Result:
+    """批量安排多名艺人训练同一项属性，如「张三、李四去训练舞蹈」。
+
+    忙碌 / 体力不足 / 名册中不存在的艺人会被跳过并单独列出；
+    全部无法训练时整体失败。费用按每人的训练成本累计一次性结算。
+    """
+    attr_key = C.ARTIST_ATTRS.get(attr_cn)
+    if not attr_key:
+        return Result.fail(f"没有「{attr_cn}」这项属性，可训练：{'、'.join(C.ARTIST_ATTRS)}")
+    names = [n for n in (names or []) if n]
+    if not names:
+        return Result.fail("请指定要训练的艺人，例如「张三、李四去训练舞蹈」。")
+    ts = U.now()
+
+    missing: list[str] = []
+    busy: list[str] = []
+    weak: list[str] = []
+    candidates: list[tuple[Artist, int]] = []  # (artist, cost)
+    for name in names:
+        artist = player.find_artist(name)
+        if artist is None:
+            missing.append(name)
+            continue
+        regen_stamina(artist, ts)
+        if artist.is_busy(ts):
+            busy.append(f"{artist.name}（{artist.status_text or '忙碌'}）")
+            continue
+        if artist.stamina < C.TRAINING_STAMINA_COST:
+            weak.append(f"{artist.name}（体力 {artist.stamina}/100）")
+            continue
+        candidates.append((artist, training_cost(artist, attr_key)))
+
+    if not candidates:
+        parts = []
+        if missing:
+            parts.append("名册中没有找到：" + "、".join(missing))
+        if busy:
+            parts.append("正在忙碌无法训练：" + "、".join(busy))
+        if weak:
+            parts.append("体力不足无法训练：" + "、".join(weak))
+        return Result.fail("、".join(parts) or "没有可训练的艺人。")
+
+    total = sum(cost for _, cost in candidates)
+    if not player.can_afford(total):
+        return Result.fail(
+            f"资金不足：批量训练 {len(candidates)} 人共需 {U.fmt_money(total)}，"
+            f"你当前有 {U.fmt_money(player.money)}。"
+        )
+    player.pay(total)
+    for artist, _ in candidates:
+        apply_stamina_cost(artist, C.TRAINING_STAMINA_COST, ts)
+        artist.status = C.STATUS_TRAINING
+        artist.training_attr = attr_key
+        artist.training_from = artist.get(attr_key)
+        artist.busy_until = ts + C.TRAINING_DURATION
+        artist.status_text = f"练习{attr_cn}中"
+    store.mark_dirty()
+
+    lines = [
+        "# 批量训练安排完成",
+        f"已有 **{len(candidates)}** 位艺人开始练习**{attr_cn}**：",
+    ]
+    for artist, cost in candidates:
+        lines.append(
+            f"- **{artist.name}**：花费 {U.fmt_money(cost)}，"
+            f"体力 {artist.stamina}/100，预计 {U.fmt_clock(artist.busy_until)} 完成"
+        )
+    lines.append("")
+    lines.append("训练结束后会分别通知你。")
+    if busy:
+        lines.append(f"忙中未训练：{'、'.join(busy)}")
+    if weak:
+        lines.append(f"体力不足未训练：{'、'.join(weak)}")
+    if missing:
+        lines.append(f"未找到：{'、'.join(missing)}")
+    return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+
+def rest_many(store: GameStore, player: Player, names: list[str]) -> Result:
+    """批量安排多名艺人休息，如「张三、李四去休息」。
+
+    忙碌 / 体力已满 / 名册中不存在的艺人会被跳过并单独列出；
+    全部无法休息时整体失败。
+    """
+    names = [n for n in (names or []) if n]
+    if not names:
+        return Result.fail("请指定要休息的艺人，例如「张三、李四去休息」。")
+    ts = U.now()
+
+    missing: list[str] = []
+    busy: list[str] = []
+    full: list[str] = []
+    candidates: list[Artist] = []
+    for name in names:
+        artist = player.find_artist(name)
+        if artist is None:
+            missing.append(name)
+            continue
+        regen_stamina(artist, ts)
+        if artist.is_busy(ts):
+            busy.append(f"{artist.name}（{artist.status_text or '忙碌'}）")
+            continue
+        if artist.stamina >= 100:
+            full.append(artist.name)
+            continue
+        candidates.append(artist)
+
+    if not candidates:
+        parts = []
+        if missing:
+            parts.append("名册中没有找到：" + "、".join(missing))
+        if busy:
+            parts.append("正在忙碌无法休息：" + "、".join(busy))
+        if full:
+            parts.append("体力已满无需休息：" + "、".join(full))
+        return Result.fail("、".join(parts) or "没有需要休息的艺人。")
+
+    for artist in candidates:
+        artist.status = C.STATUS_REST
+        artist.status_text = "休息中"
+        artist.busy_until = ts + C.REST_DURATION
+    store.mark_dirty()
+
+    lines = [
+        "# 批量休息安排完成",
+        f"已有 **{len(candidates)}** 位艺人回休息室调整状态：",
+    ]
+    for artist in candidates:
+        lines.append(
+            f"- **{artist.name}**：预计 {U.fmt_clock(artist.busy_until)} 恢复（体力 +{C.REST_STAMINA_GAIN}）"
+        )
+    lines.append("")
+    if busy:
+        lines.append(f"忙中未休息：{'、'.join(busy)}")
+    if full:
+        lines.append(f"体力已满未休息：{'、'.join(full)}")
+    if missing:
+        lines.append(f"未找到：{'、'.join(missing)}")
+    return Result.success(card=R.Card(markdown="\n".join(lines)))
+
+
+# --------------------------------------------------------------------------
 # 秀场
 # --------------------------------------------------------------------------
 def ensure_daily_show(store: GameStore, player: Player, ts: float | None = None) -> None:
