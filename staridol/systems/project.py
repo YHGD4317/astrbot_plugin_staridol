@@ -564,53 +564,51 @@ def find_project_for_invest(store: GameStore, player: Player, name: str) -> tupl
 
 
 def _invest_outcome(
-    check: U.CheckResult, amount: int, old_invest: int, extra_budget: int
+    check: U.CheckResult, amount: int
 ) -> tuple[int, int, int, int]:
-    """根据一次追加投资判定，计算资金的最终去向（纯计算，不改变任何状态）。
+    """根据一次追加投资判定，计算系统为玩家垫付的追加投资额（纯计算，不改变任何状态）。
 
-    ``extra_budget`` 为本次追加“大成功”时可额外动用的资金上限（由调用方传入）。
-
-    返回 ``(pay_total, added, lost, extra)``：
-      * ``pay_total``：本次实际从玩家扣款的金额；
-      * ``added``：实际落实到项目投资中的金额；
-      * ``lost``：因失败被扣除（亏损）的钱款；
+    追加投资为系统额外帮付的钱，不从玩家账户扣除。返回 ``(grant, added, lost, extra)``：
+      * ``grant``：本次系统垫付的名义出资额；
+      * ``added``：实际落实到项目投资中的金额（计入玩家在该项目的投入份额）；
+      * ``lost``：因失败被扣除（亏损）的垫付款项；
       * ``extra``：大成功时额外追加的投资。
 
     规则（与其他判定一致）：
-      * **大成功**：全额投资，并额外追加随机比例的投资（受可支付资金约束）；
-      * **成功**：全额投资；
-      * **普通失败**：款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
-      * **大失败**：本笔全部扣光（loss=amount、added=0），并可能缩减原有投资（由调用方处理）。
+      * **大成功**：全额垫付，并额外追加随机比例的投资；
+      * **成功**：全额垫付；
+      * **普通失败**：垫付款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
+      * **大失败**：垫付款项全部扣光（lost=amount、added=0），并可能缩减原有投资（由调用方处理）。
     """
     extra = 0
     lost = 0
     if check.crit_success:
         extra = int(round(amount * random.uniform(*C.INVEST_EXTRA_RATIO_RANGE)))
-        extra = max(0, min(extra, extra_budget))
-        pay_total = amount + extra
-        added = pay_total
+        grant = amount + extra
+        added = grant
     elif check.success:
-        pay_total = amount
+        grant = amount
         added = amount
     elif check.crit_fail:
-        pay_total = amount
+        grant = amount
         added = 0
         lost = amount
     else:
         loss_ratio = random.uniform(*C.INVEST_LOSS_RATIO_RANGE)
         lost = min(int(amount * loss_ratio), amount)
-        pay_total = amount
+        grant = amount
         added = amount - lost
-    return pay_total, added, lost, extra
+    return grant, added, lost, extra
 
 
 def add_investment(store: GameStore, player: Player, project_name: str, amount: int) -> Result:
     """追加项目投资，提高投资额与项目评分。
 
+    * 追加投资为系统额外帮付的钱，不从玩家账户扣除；无需检查玩家资金；
     * 追加前随机进行「财商」或「决策」判定（判定规则与其他判定一致）；
-    * **大成功**：全额投资并额外追加随机比例的投资；
-    * **普通失败**：款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
-    * **大失败**：本笔全部亏损，并缩减原有项目投资、降低对应评分；
+    * **大成功**：系统全额垫付并额外追加随机比例的投资；
+    * **普通失败**：垫付款项因拍摄事故 / 贪污 / 反响不佳等原因被扣除随机比例，剩余落实投资；
+    * **大失败**：垫付款项全部亏损，并缩减原有项目投资、降低对应评分；
     * 业主可直接追加自己名下未结束的项目；其他玩家仅当项目已开放投资时才能追加；
     * 收益在项目结算时按各方投入的资金比例分配。
     """
@@ -621,10 +619,6 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
     if amount < C.MIN_INVEST:
         return Result.fail(
             f"追加投资金额过低，最少 {U.fmt_money(C.MIN_INVEST)}，例如「追加投资《项目名》500」。"
-        )
-    if not player.can_afford(amount):
-        return Result.fail(
-            f"资金不足：追加需要 {U.fmt_money(amount)}，你当前有 {U.fmt_money(player.money)}。"
         )
 
     owner, project, is_owner = find_project_for_invest(store, player, project_name)
@@ -644,9 +638,7 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
     check = U.roll_check(attr_cn, player.attr(attr_key), player.buff_value("check"))
     check_cn = check.describe()
 
-    pay_total, added, lost, extra = _invest_outcome(
-        check, amount, old_invest, max(0, int(player.money) - amount)
-    )
+    grant, added, lost, extra = _invest_outcome(check, amount)
     reduce_old = 0  # 大失败时缩减的原有项目投资
 
     if check.crit_fail and added == 0:
@@ -661,19 +653,19 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
                 project.investor_funds[uid] = int(project.investor_funds[uid] * ratio)
             project.invest = new_invest
 
-    player.pay(pay_total)
+    # 追加投资为系统额外帮付的钱，不从玩家账户扣除
     project.invest = project.invest + added
     project.investor_funds[player.uid] = int(project.investor_funds.get(player.uid, 0)) + added
     _recompute_score(project)
     store.mark_dirty()
     if is_owner:
         owner.push_log(
-            f"为《{project.name}》追加投资 {U.fmt_money(pay_total)}"
+            f"为《{project.name}》追加投资 {U.fmt_money(grant)}（系统垫付）"
             f"（{attr_cn}判定：{check.level_cn}）"
         )
     else:
         owner.push_log(
-            f"{player.name} 为《{project.name}》追加投资 {U.fmt_money(pay_total)}"
+            f"{player.name} 为《{project.name}》追加投资 {U.fmt_money(grant)}（系统垫付）"
             f"（{attr_cn}判定：{check.level_cn}）"
         )
 
@@ -683,19 +675,19 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
 
     if check.crit_success:
         outcome = (
-            f"{attr_cn}判定**大成功**（{check_cn}）！投资 {U.fmt_money(amount)} 全额到位，"
-            f"行情看好额外追加 **{U.fmt_money(extra)}**，实际入账 {U.fmt_money(added)}。"
+            f"{attr_cn}判定**大成功**（{check_cn}）！系统垫付 {U.fmt_money(amount)} 全额到位，"
+            f"行情看好额外追加 **{U.fmt_money(extra)}**，实际入账 {U.fmt_money(added)}（系统出资）。"
         )
     elif check.success:
-        outcome = f"{attr_cn}判定通过（{check_cn}），投资 {U.fmt_money(amount)} 全额到位。"
+        outcome = f"{attr_cn}判定通过（{check_cn}），系统垫付 {U.fmt_money(amount)} 全额到位。"
     elif check.crit_fail:
         outcome = (
-            f"{attr_cn}判定**大失败**（{check_cn}）！本笔投资 {U.fmt_money(lost)} 全部亏损，"
+            f"{attr_cn}判定**大失败**（{check_cn}）！系统垫付的 {U.fmt_money(lost)} 全部亏损，"
             + (f"原有投资也被削减 {U.fmt_money(reduce_old)}，对应评分下降。" if reduce_old else "对应评分下降。")
         )
     else:
         outcome = (
-            f"{attr_cn}判定未通过（{check_cn}），钱款因{random.choice(C.INVEST_FAIL_REASONS)}"
+            f"{attr_cn}判定未通过（{check_cn}），系统垫付款因{random.choice(C.INVEST_FAIL_REASONS)}"
             f"被扣除 {U.fmt_money(lost)}，剩余 {U.fmt_money(added)} 落实投资。"
         )
 
@@ -703,11 +695,11 @@ def add_investment(store: GameStore, player: Player, project_name: str, amount: 
         f"# 追加投资{'大成功' if check.crit_success else ('大失败' if check.crit_fail else '结果')}",
         f"**项目**：《{project.name}》（{project.ptype}）",
         outcome,
-        f"**实际扣款**：{U.fmt_money(pay_total)}　**入账投资**：{U.fmt_money(added)}　**总投资**：{U.fmt_money(project.invest)}",
+        f"**系统垫付**：{U.fmt_money(grant)}　**入账投资**：{U.fmt_money(added)}　**总投资**：{U.fmt_money(project.invest)}",
         f"**评分**：{U.fmt_score(project.score)}",
         f"**你的投入**：{U.fmt_money(share)}（占总资金 {percent:.1f}%）",
         "",
-        "项目结算收益将按投入资金比例分配。",
+        "追加投资为系统出资，不从你的账户扣款。项目结算收益按各方投入资金比例分配。",
     ]
     if project.status == C.PROJECT_PENDING:
         lines.append(f"发送「{project.name}项目开始」可启动项目。")

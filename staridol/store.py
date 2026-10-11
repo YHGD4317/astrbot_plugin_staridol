@@ -352,7 +352,7 @@ class GameStore:
                 else None
             ),
             quest_count=self.base_quest + player.asset_tier,
-            reward_multiplier=1.0 + player.asset_tier * 0.35,
+            reward_multiplier=C.QUEST_REWARD_TIER_GROWTH**player.asset_tier,
         )
 
     def show_total(self, player: Player) -> int:

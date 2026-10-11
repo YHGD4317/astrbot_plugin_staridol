@@ -138,8 +138,12 @@ ASSET_TIERS: list[int] = [
     10000000,
 ]
 
-#: 事务基础奖励（单位：w），实际奖励 = 基础 * (1 + 档位 * 0.35) * 随机波动
+#: 事务基础奖励（单位：w），实际奖励 = 基础 * 档位倍率 * 随机波动
 QUEST_BASE_REWARD = 40
+
+#: 档位奖励倍率的增长率。每提升一档，事务奖励倍率乘以该值（默认每档翻倍）。
+#: 档位 8（总资产 100 亿）时倍率 = 2^8 = 256，基础奖励约 1 亿（10102w / 40w * 256 = 10240w）。
+QUEST_REWARD_TIER_GROWTH = 2.0
 
 #: 事务大失败时的资金损失比例（占总资产）
 QUEST_FAIL_LOSS_RATE = 0.04
@@ -366,7 +370,7 @@ MAX_ARTISTS_PER_PROJECT = 6
 MIN_SCORE = 0.0
 
 #: 离线通知队列上限（主动推送失败时暂存，等玩家下次交互时补发）
-MAX_PENDING_NOTICES = 20
+MAX_PENDING_NOTICES = 40
 
 #: 单次随回复补发的通知条数上限。改为一次取出全部待补发通知，
 #: 使多条离线信息合并为一整条「离线消息」卡片一次送达，而非分批多次补发。
@@ -737,7 +741,7 @@ def tier_of(total_asset: int, base_quest: int = DEFAULT_DAILY_QUEST) -> TierInfo
         tier=tier,
         next_threshold=next_threshold,
         quest_count=base_quest + tier,
-        reward_multiplier=1.0 + tier * 0.35,
+        reward_multiplier=QUEST_REWARD_TIER_GROWTH**tier,
     )
 
 
