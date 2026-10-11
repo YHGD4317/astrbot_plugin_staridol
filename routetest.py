@@ -214,6 +214,11 @@ def main() -> None:
         ("使用能量饮料给苏清和", "use_item"),
         ("给林星野、苏清和使用4个能量饮料", "use_item_many"),
         ("对林星野、苏清和用3个演技指导", "use_item_many"),
+        # 大批量（15 名艺人，姓名总长超过原 60 字符上限），应仍能匹配
+        ("给" + "、".join(f"艺人{i}" for i in range(15)) + "使用4个能量饮料", "use_item_many"),
+        ("对" + "、".join(f"艺人{i}" for i in range(15)) + "用3个演技指导", "use_item_many"),
+        ("给" + "、".join(f"艺人{i}" for i in range(15)) + "去训练舞蹈", "train_many"),
+        ("给" + "、".join(f"艺人{i}" for i in range(15)) + "去休息", "rest_many"),
         ("创建影视公司", "create_company"),
         ("收取分红", "dividend"),
         # 投资赌场（NPC 经营赌场）
@@ -589,6 +594,7 @@ async def integration() -> None:
     from astrbot_plugin_staridol.staridol.systems import casino_biz as CB
 
     player.casino_biz = None
+    player.cash = 5000  # 先补齐现金，避免前方随机商城购买耗尽余额导致注资失败
     result = await run("查询赌场")
     check(result is not None and result.ok, "查询赌场可打开面板", result.text)
     result = await run("投资赌场5000")
@@ -608,6 +614,31 @@ async def integration() -> None:
     else:
         check(result is not None, "收取分红正常执行（无利润时给出提示）")
     player.casino_biz = None  # 清理避免影响后续断言
+
+    # 11.8 大批量（18 名艺人，指令总长超过原 80 字符上限）批量训练与批量使用道具
+    from staridol.models import Artist as _Artist
+
+    player.cash = 1000000
+    player.artists = []
+    for i in range(18):
+        player.artists.append(_Artist(aid=str(i), name=f"艺人{i:02d}", stamina=100, level=1))
+    player.items["能量饮料"] = 100
+    many = "、".join(f"艺人{i:02d}" for i in range(18))
+    train_cmd = f"给{many}去训练舞蹈"
+    check(len(train_cmd) > 80, "批量训练指令长度超过旧上限 80 字符", str(len(train_cmd)))
+    result = await run(train_cmd)
+    check(result is not None and result.ok, "18 人批量训练指令生效（超长消息可被处理）")
+    check(all(a.status == "training" for a in player.artists), "18 名艺人全部进入训练")
+    # 复位后批量使用道具
+    for a in player.artists:
+        a.status = "idle"
+        a.busy_until = 0
+        a.stamina = 50
+    use_cmd = f"给{many} 使用4个能量饮料"
+    check(len(use_cmd) > 80, "批量使用道具指令长度超过旧上限 80 字符", str(len(use_cmd)))
+    result = await run(use_cmd)
+    check(result is not None and result.ok, "18 人批量使用道具指令生效（超长消息可被处理）")
+    check(player.items.get("能量饮料", 0) == 100 - 4, "18 人平分 4 个道具，共消耗 4 个")
 
     # 12. 非指令消息放行
     result = await router.handle(FakeEvent("今天天气不错，适合出去走走"))

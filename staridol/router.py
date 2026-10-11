@@ -174,11 +174,11 @@ class Router:
                 "train",
             ),
             (
-                re.compile(rf"^(?:给)?(?P<names>.{{1,60}}?)去(?:训练|练习|学习)(?P<attr>{ARTIST_ATTR_PATTERN})$"),
+                re.compile(rf"^(?:给)?(?P<names>.{{1,300}}?)去(?:训练|练习|学习)(?P<attr>{ARTIST_ATTR_PATTERN})$"),
                 "train_many",
             ),
             (re.compile(rf"^(?P<name>{NAME}?)去(?:休息|休假)$"), "rest"),
-            (re.compile(rf"^(?:给)?(?P<names>.{{1,60}}?)去(?:休息|休假)$"), "rest_many"),
+            (re.compile(rf"^(?:给)?(?P<names>.{{1,300}}?)去(?:休息|休假)$"), "rest_many"),
             # ---- 今日事务 ----
             (re.compile(r"^(?:今日行程|今日事务|事务|行程)$"), "quest"),
             (re.compile(r"^(?:事务进度|事务列表)$"), "quest_summary"),
@@ -213,7 +213,7 @@ class Router:
                 "start_project",
             ),
             (
-                re.compile(rf"^(?P<artists>.{{1,40}}?)参加[《<]?(?P<project>[^》>]{{1,14}})[》>]?$"),
+                re.compile(rf"^(?P<artists>.{{1,300}}?)参加[《<]?(?P<project>[^》>]{{1,14}})[》>]?$"),
                 "join_project",
             ),
             (re.compile(r"^投资\s*(?P<index>\d+)\s*号?(?:项目)?$"), "invest_market"),
@@ -257,7 +257,7 @@ class Router:
             ),
             (
                 re.compile(
-                    rf"^(?:给|对)\s*(?P<names>.{{1,60}}?)\s*(?:使用|用)\s*"
+                    rf"^(?:给|对)\s*(?P<names>.{{1,300}}?)\s*(?:使用|用)\s*"
                     rf"(?P<count>\d+)?\s*个?\s*(?P<name>{ITEM_PATTERN})$"
                 ),
                 "use_item_many",
@@ -297,7 +297,10 @@ class Router:
     async def handle(self, event: AstrMessageEvent) -> Result | None:
         """尝试处理一条消息。返回 None 表示不是本插件的指令。"""
         text = normalize(event.message_str)
-        if not text or len(text) > 80:
+        # 批量指令（一次操作多名艺人，如「张三、李四…去训练」「给张三、李四…使用道具」）
+        # 消息可能很长（最多 30 名艺人），把长度上限放宽到 300 字符；
+        # 普通聊天通常远低于该值，仍会被当作指令候选逐条匹配，匹配不到即放行。
+        if not text or len(text) > 300:
             return None
 
         handler_name = ""
